@@ -74,6 +74,14 @@ DATA_ROOT_LAYOUT = {'eval_root': 'eval', 'raw_root': 'archive', 'seed_campaign':
 STAGE = N_TASKS  # the improved model is scored as a stage-5 model of the round-1 config
 
 
+
+
+def _kind(name: str) -> str:
+    """Hyperparameters, gate and baseline rows of a run: an active-learning variant (``al_<selection>``, built by
+    tools/al_build_variant.py) is trained and gated as the pilot, so only its real images differ."""
+    return 'pilot' if name.startswith('al_') else name
+
+
 # --- plan ---------------------------------------------------------------------------------------------------------
 def with_data_root(settings: dict) -> dict:
     """The paths of a self-contained data folder (``DATA_ROOT_LAYOUT``) for the keys the settings leave out."""
@@ -418,7 +426,7 @@ def _run_variant(plan: dict, name: str, rows: list[int], feedback: list[int], pr
     """Data, training, Val-B scores and gate of one improve run, against the scored run ``reference``."""
     with _attempt(plan, name) as (record, attempt):
         task_dir, release, data = _build_data(plan, name, rows, feedback)
-        _train(plan, record, attempt, name, task_dir, release, prev, VARIANTS[name], splits='val')
+        _train(plan, record, attempt, name, task_dir, release, prev, VARIANTS[_kind(name)], splits='val')
     rows = load_json(task_dir / 'train_rows.json')  # a prebuilt release brings its own rows
     run, root = Path(plan['runs']) / f'{EXP}-{name}', Path(plan['root'])
     score = _score(plan, run, name)
@@ -435,9 +443,10 @@ def _run_variant(plan: dict, name: str, rows: list[int], feedback: list[int], pr
     ap_base = _ap50(plan, root / 'scored' / reference, others) if others else float('nan')
     ap_new = _ap50(plan, root / 'scored' / name, others) if others else float('nan')
     cacc_base = load_json(root / 'stages' / f'{reference}.json')['cAcc_m2']
-    decision, reason = verdict(GATES[name], cacc_base, score['cAcc_m2'], comparison, ap_base, ap_new)
-    gate = _gate(plan, f'improve {name}', decision, reason, **GATES[name])
-    report = {'stage': name, 'reference': reference, 'rows': rows, 'data': data, 'hyperparameters': VARIANTS[name],
+    decision, reason = verdict(GATES[_kind(name)], cacc_base, score['cAcc_m2'], comparison, ap_base, ap_new)
+    gate = _gate(plan, f'improve {name}', decision, reason, **GATES[_kind(name)])
+    report = {'stage': name, 'reference': reference, 'rows': rows, 'data': data,
+              'hyperparameters': VARIANTS[_kind(name)],
               **score, 'AP50_other': {'base': ap_base, 'new': ap_new},
               'comparison': {k: v for k, v in comparison.items() if k != 'per_sku'}}
     return _finish(plan, name, report, gate)
@@ -447,7 +456,7 @@ def stage_data(plan: dict, variant: str) -> dict:
     """Only the training data of one run (no GPU): to check the numbers before renting a machine. Training builds
     the same data again (same seed), so nothing here has to be copied."""
     baseline = _require(plan, 'baseline')
-    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][variant]
+    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][_kind(variant)]
     task_dir, _, manifest = _build_data(plan, variant, rows, baseline['wrong_images'])
     per_row = manifest.get('objects_per_row') or manifest.get('objects_per_weak_sku') or {None: 0}
     trained = load_json(task_dir / 'train_rows.json')
@@ -459,9 +468,12 @@ def stage_data(plan: dict, variant: str) -> dict:
 
 
 def stage_train(plan: dict, variant: str) -> dict:
-    """pilot, e1 (after a pilot go) or e2 (every row; only after an e1 stop): one improve run from the round-1 model."""
-    if variant not in ('pilot', 'e1', 'e2'):
-        raise ValueError(f'variant must be pilot, e1 or e2, got {variant}')
+    """pilot, e1 (after a pilot go), e2 (every row; only after an e1 stop) or al_<selection> (an active-learning
+    variant, trained as the pilot): one improve run from the round-1 model."""
+    if variant not in ('pilot', 'e1', 'e2') and not variant.startswith('al_'):
+        raise ValueError(f'variant must be pilot, e1, e2 or al_<selection>, got {variant}')
+    if variant.startswith('al_') and _prebuilt(plan, variant) is None:
+        raise FileNotFoundError(f'{variant}: no prebuilt variant (python -m tools.al_build_variant)')
     done = _done(plan, variant)
     if done:
         return done
@@ -472,7 +484,7 @@ def stage_train(plan: dict, variant: str) -> dict:
         e1 = _done(plan, 'e1')
         if not e1 or e1['gate']['decision'] != 'stop':
             raise RuntimeError('e2 runs only after the e1 gate said stop (and the user agreed)')
-    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][variant]
+    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][_kind(variant)]
     return _run_variant(plan, variant, rows, baseline['wrong_images'], plan['seed_task5'], 'baseline')
 
 
@@ -545,11 +557,12 @@ def main(argv: list[str] | None = None) -> dict:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--mode', choices=('improve', 'new'), required=True)
     parser.add_argument('--settings', required=True)
-    parser.add_argument('--stage', choices=(*STAGES, 'data', 'final_test'), required=True,
+    parser.add_argument('--stage', choices=(*STAGES, 'data', 'al', 'final_test'), required=True,
                         help='runs the stages before it that are not done yet, then this one')
     parser.add_argument('--confirm-test', action='store_true', help='with --stage final_test: score test2019 once')
-    parser.add_argument('--variant', choices=('pilot', 'e1', 'e2'), default='pilot',
-                        help='with --stage data: the run whose training data to build (split and baseline run first)')
+    parser.add_argument('--variant', default='pilot',
+                        help='with --stage data: the run whose training data to build (split and baseline run first); '
+                             'with --stage al: the al_<selection> variant to train')
     args = parser.parse_args(argv)
     if args.mode == 'new':
         raise NotImplementedError('mode new is Part 2 of the plan (Tasks 8-10)')
@@ -565,6 +578,12 @@ def main(argv: list[str] | None = None) -> dict:
         return stage_data(plan, args.variant)
     if args.stage == 'e2':
         return stage_train(plan, 'e2')
+    if args.stage == 'al':
+        if not args.variant.startswith('al_'):
+            parser.error('--stage al needs --variant al_<selection>')
+        stage_split(plan)
+        stage_baseline(plan)
+        return stage_train(plan, args.variant)
     result = {}
     for stage in order[:order.index(args.stage) + 1]:
         result = STAGES[stage](plan)
