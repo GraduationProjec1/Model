@@ -1,0 +1,50 @@
+# Runbook — học lại (mode improve) với thư mục dữ liệu `relearn_fix_v1` (02/11/2026)
+
+Chỉ cần hai thư mục, đặt **cạnh nhau**:
+```
+~/AutoCheckout-CL/      code (nhánh feat/update-model + các sửa ngày 02/11)
+~/relearn_fix_v1/       dữ liệu tự đủ (12 GB), tạo bằng build_relearn_data.py --self-contained
+```
+Đặt nơi khác thì `export RELEARN_DATA_ROOT=/duong/dan/relearn_fix_v1`.
+
+## Trong `relearn_fix_v1/`
+| Thư mục | Nội dung |
+|---|---|
+| `variants/pilot`, `variants/e1` | `train_task_5_fix.json` (ảnh phản hồi Val-A x3 + ảnh ghép v2 theo hạn mức + replay), `train_rows.json`, `manifest.json` |
+| `images/real`, `images/v2` | ảnh train đã chép sẵn |
+| `eval/` | `rpc_eval_official_v1`: `val_full.json`, `test_full.json`, `task_config.json`, ... |
+| `archive/val2019`, `archive/test2019` | ảnh val (5.792) và test (24.000) để chấm |
+| `pretrained/hf-cache` | Deformable DETR (SenseTime) + ConvNeXt-V2 base, đúng revision code ghim |
+| `seed/full-syn-r1` | model round 1: `task_5/task_final.pth` (md5 fe510a4c…), `pred_val.npz`, FSA `hf_model`, `plan.json` |
+| `meta/` | Val-A / Val-B, cặp nhầm, SKU yếu |
+| `SHA256SUMS` | kiểm toàn vẹn |
+
+## Chạy (máy GPU, env `pdp` như handoff M5 mục 3.3)
+```bash
+tmux new -s relearn
+conda activate pdp && cd ~/AutoCheckout-CL
+bash scripts/run_relearn_fix.sh data        # kiểm dữ liệu + split + baseline + in số liệu pilot (CPU, vài phút)
+bash scripts/run_relearn_fix.sh             # pilot: 4 epoch (~1 giờ trên 4090, ước tính)
+```
+Lần đầu script kiểm `SHA256SUMS` (bỏ qua bằng `CHECK=0`). Bị ngắt thì chạy lại đúng lệnh.
+
+Kết quả: `data/training/update-model/relearn-fix-v1/`
+- `stages/baseline.json`: cAcc-M2 Val-B của round 1 (đo trên Mac: 0,4308), 1.633 ảnh Val-A đếm sai.
+- `stages/pilot.json`: cổng go/stop, `data.rows_differ_from_baseline` (SKU khác giữa gói và code; pilot: không có).
+- `scored/pilot/sku_regression.json`: từng SKU, cặp nhầm trước/sau.
+
+Pilot `go` → `bash scripts/run_relearn_fix.sh e1` (~2,5 giờ). Chỉ khi nhóm chốt cấu hình cuối:
+`bash scripts/run_relearn_fix.sh final_test --confirm-test` (chấm test2019 một lần).
+
+## Giới hạn
+- Ảnh ghép là v2 cũ (chưa đủ mặt): bản đủ mặt `rpc_synth_relearn_v1` không có trên Mac. Khi có, tạo lại thư mục
+  bằng `build_relearn_data.py --relearn <tar> --self-contained` (tên mới, campaign mới).
+- `round2` dựng dữ liệu từ release v2 gốc (không có trong thư mục này): cần giải nén `full_syn_rpc_synth_v2_v1_*.tar`
+  và đặt `synth_v2_root`, nếu không code báo lỗi rõ.
+- E1 của gói có 63 SKU; code tính lại trên Val-B ra 64 (thêm label 168). Gói train đúng 63 SKU của nó, chấm theo đó.
+
+## Sửa trong code (chưa commit)
+- `autocheckout/feedback_fix.py`: `select_by_quota()` (+ test trong `tests/test_feedback_fix.py`).
+- `autocheckout/update_model.py`: `data_root` / `RELEARN_DATA_ROOT`; `prebuilt_release`; hạn mức `quota_*`;
+  `--stage data`; chấm theo `train_rows.json` thật sự train; round2 báo lỗi rõ khi thiếu v2.
+- `configs/training/update_model_relearn_fix_v1.json`, `scripts/run_relearn_fix.sh`, file này.

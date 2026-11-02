@@ -1,0 +1,20 @@
+# Tiền xử lý dữ liệu
+
+**Cập nhật 21/10/2026:** bộ ảnh ghép cũ được gọi là **synthetic v1**, đã có backup Drive theo xác nhận người dùng và đã xóa `data/archive/synth/group/` local (20.000 ảnh + 4 annotation). Bộ sinh mới là **v2**, chưa sinh. [Biên bản lưu trữ/xóa local](reports/synth-v1-retirement-2026-10-21.md) ghi checksum, khôi phục và các phụ thuộc; bản resolved 202 còn 193 ảnh mới nhưng 9 ảnh giữ nguồn cần restore từ Drive.
+
+Cập nhật kế hoạch **20/10/2026** trên `feat/synthetic-data-v2`: [thiết kế](../project/synthetic-data-v2-design-2026-10-20.md) và [kế hoạch ảnh ghép v2](../project/synthetic-data-v2-plan-2026-10-20.md). Đã đọc code/index nguồn; chưa sinh ảnh hoặc thay dữ liệu. Hướng mới là kiểm kê cutout → pilot 200 ảnh/task để nhóm duyệt → release mới, giữ nguyên real holdout và artifacts lịch sử bên dưới.
+
+Trạng thái 08/10/2026: **real-only release đã khóa**, **202 case synth đã xử lý**, **20 case pilot còn pending**. Chưa thêm synth vào release ảnh thật; chưa phát hành lại toàn bộ 20.000 ảnh synth.
+
+| Bước | Notebook | Kết quả hiện tại |
+|---|---|---|
+| Inventory/COCO | [01_data_audit](../../notebooks/data_preprocessing/01_data_audit.ipynb) | Kiểm kê dữ liệu nhập, ảnh thiếu và protocol nguồn |
+| Tài nguyên tiền xử lý | [01b_preprocessing_acceptance](../../notebooks/data_preprocessing/01b_preprocessing_acceptance.ipynb) | Full decode/hash 57.710 file; 208 nền, 7.502 cutout/200 SKU; phát hiện 222 case cần xem |
+| Chọn protocol | [01c_protocol_comparison](../../notebooks/data_preprocessing/01c_protocol_comparison.ipynb) | Phân tích nguồn 4 task; quyết định sau đó là 5 task 100+4×25 |
+| Split/nhãn task | [02_split_and_acceptance](../../notebooks/data_preprocessing/02_split_and_acceptance.ipynb) | Native real-only: 22.494 train, 1.503 val, 6.003 test; 9 gate đạt |
+| Visual/AI/Batch review | [03_annotation_review](../../notebooks/data_preprocessing/03_annotation_review.ipynb) | 222 card/gallery; 2 pilot ×10 và Batch 200 có đề xuất, các gate nội dung lịch sử FAIL |
+| Áp dụng và nghiệm thu | [04_annotation_resolution](../../notebooks/data_preprocessing/04_annotation_resolution.ipynb) | 202 ảnh/2.846 object: 9 giữ, 193 tái ghép; owner-mask/RLE xác minh 2.721 object; CSV còn 20 pending ngoài scope |
+
+Đọc [hướng dẫn vận hành](OPERATIONS.md) trước khi chạy lại, [chỉ mục code/config/tests](../project/IMPLEMENTATION_INDEX.md) khi sửa triển khai, [báo cáo theo run](reports/README.md) khi truy nguồn. [Schema](formats.md) phân biệt native release với legacy 800.
+
+Scope 202 nằm ở `data/processed/rpc_synth_resolved_202_v1`, có mapping 5 task nhưng là bản augmentation riêng của synthetic v1, không phải v2. Gate lịch sử không chứng nhận mask gốc của 9 ảnh giữ, accuracy GT của API, toàn bộ synth hay mục tiêu overlap 20–45%; hiện phải restore nguồn v1 trước khi chạy lại các bước cần nguồn. Không chia lại holdout đã khóa.

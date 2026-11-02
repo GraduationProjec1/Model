@@ -1,0 +1,29 @@
+# Nhật ký thực nghiệm
+
+Các báo cáo lưu mục đích, thời điểm chạy, cấu hình, artifacts và gate nghiệm thu. Trạng thái remote của Batch xem trong submission.json hoặc chạy cell theo dõi notebook.
+
+| Ngày | Công việc | Báo cáo |
+|---|---|---|
+| 21/10/2026 | Đặt tên synthetic v1/v2; xóa 20.000 ảnh v1 local theo yêu cầu người dùng, backup Drive đã được người dùng xác nhận | [Biên bản và receipt](../data_preprocessing/reports/synth-v1-retirement-2026-10-21.md) |
+| 20/10/2026 | Đọc code/rules và metadata cutout; lập kế hoạch nhánh `feat/synthetic-data-v2`, chưa chạy generator/train | [Thiết kế](../project/synthetic-data-v2-design-2026-10-20.md), [kế hoạch](../project/synthetic-data-v2-plan-2026-10-20.md) |
+| 07/10/2026 | Audit/split 5 task và review nhãn synth | [Tiền xử lý](../data_preprocessing/README.md) |
+| 07/10/2026 | Pilot GPT-6.1 Sol trên 10 ảnh mới | [Pilot Sol](../data_preprocessing/reports/sol-pilot-2026-10-07.md) |
+| 08/10/2026 | Batch GPT-6.1 Sol, đúng 200 ảnh, 2 deferred | [Batch và nghiệm thu notebook](../data_preprocessing/reports/sol-batch-2026-10-08.md) |
+| 08/10/2026, 13:16–13:34 UTC+7 | API chốt và pipeline xử lý thật 202 ảnh | [Resolution 202 / notebook 04](../data_preprocessing/reports/annotation-resolution-202-2026-10-08.md) |
+| 08/10/2026 | Tổ chức docs, chỉ mục code/config/notebook và runbook; commit theo chức năng | [Chỉ mục triển khai](../project/IMPLEMENTATION_INDEX.md), [vận hành](../data_preprocessing/OPERATIONS.md), [kiểm chứng](../project/PROGRESS.md) |
+| 09/10/2026 | Sửa dependency pins theo log Conda; tạo handoff, model notebook chưa chạy | [Handoff agent tiếp theo](../project/HANDOFF_2026-10-09.md), [môi trường](../environment/README.md) |
+| 09/10/2026, 15:12:32–15:13:43 UTC+7 | Notebook 01 limited PDP foundation PASS trên CPU/máy 3060; tạo notebook 02 full CUDA, chưa chạy | [Bằng chứng và phạm vi model](model-foundation-2026-10-09.md) |
+| 09/10/2026, 16:12:09–16:12:57 UTC+7 | Full pretrained PDP CUDA 640/800 smoke PASS trên RTX 3060, PyTorch fallback; sửa device sau Lightning teardown | [Báo cáo full baseline](model-foundation-2026-10-09.md#full-baseline-cuda-đạt-trên-rtx-3060) |
+| 09/10/2026 | Khép phạm vi notebook processor/loader/PDP nền; cập nhật docs hiện hành và thứ tự bước tiếp theo | [Kết luận nghiệm thu](../project/PDP_FOUNDATION_ACCEPTANCE.md) |
+| 12/10/2026 | Setup L4 GCP, tải data bằng rclone, native kernel/resume smoke PASS, chạy baseline trong tmux với live notebook | [Setup L4 và logging](../environment/GCP_L4_SETUP_2026-10-12.md) |
+| 13/10/2026, 05:18 UTC+7 | ConvNeXt baseline Task 1 hoàn tất cùng predictions/policy/evaluation | [Kết quả Task 1 và chuyển GPU](../environment/TRANSFER_TO_4080_2026-10-13.md) |
+| 13/10/2026, 09:56 UTC+7 | Dừng L4 theo người dùng để chuyển sang 4080 SUPER; Task 2 checkpoint 6.414, audit/manifest đạt | [Bàn giao chuyển máy](../environment/TRANSFER_TO_4080_2026-10-13.md) |
+| 14/10/2026 | ConvNeXt đủ 5 task trên 4080 SUPER; tiếp tục ResNet | [Báo cáo cuối](../project/FINAL_BACKBONE_COMPARISON_2026-10-20.md) |
+| 15/10/2026, 19:28:27 UTC+7 | Baseline hai backbone COMPLETED | [Báo cáo cuối](../project/FINAL_BACKBONE_COMPARISON_2026-10-20.md) |
+| 20/10/2026 | Cài lại Conda pdp; 63 tests evaluation; tính lại counting 10 stage, final calibration/AP và báo cáo | [Báo cáo](../project/FINAL_BACKBONE_COMPARISON_2026-10-20.md), [notebook evaluation 02](../../notebooks/evaluation/02_final_backbone_report.ipynb) |
+
+[Nhật ký chi tiết 06–08/10](history-2026-10-06-08.md) · [Tiến độ dự án](../project/PROGRESS.md) · [Notebook review](../../notebooks/data_preprocessing/03_annotation_review.ipynb).
+
+- [Nghiệm thu CLI/runner và notebook 04](../project/TRAINING_RUNTIME_ACCEPTANCE.md): run `ac818116-ceb0-4ce8-9c1e-979c6f54788a`, 78 tests, 4 CUDA cases, 10/10 gates; xem báo cáo cho timestamps thực chạy và giới hạn.
+- [S6 calibration/evaluation](../project/COUNT_CALIBRATION_ACCEPTANCE.md): evaluation 01 đã PASS trên CPU, val-only policy/test-only reload/raw mAP và 4 cases predictions notebook 04; báo cáo giữ run ID/timestamps và giới hạn metrics subset.
+- [Training notebooks và dry run](../project/TRAINING_NOTEBOOK_DRY_RUN.md): 10/10, CPU pilot/transition/5 task trong tmux detached, interruption/resume, per-task metrics, 88 regression tests; artifacts mới dưới data. [Runbook](../project/TRAINING_NOTEBOOK_RUNBOOK.md) hướng dẫn settings/upload/tmux/logs/resume cho real run trên 4090.

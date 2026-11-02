@@ -1,0 +1,18 @@
+{
+  "campaign_id": "relearn-fix-v1",
+  "round": 1,
+  "artifact_root": "data/training/update-model",
+  "dry_run": false,
+  "data_root": "../relearn_fix_v1",
+  "seed_task5_md5": "fe510a4c4dc2c81a328299c4009d31ff",
+  "relearn_release": null,
+  "relearn_task_config": "configs/relearn/task_config_relearn.json",
+  "selection": "configs/relearn/selection.json",
+  "release_out": "data/processed/rpc_feedback_fix_round2",
+  "split_seed": 20261101,
+  "pilot_pairs": 10,
+  "e1_min_count": 10,
+  "feedback_repeat": 3,
+  "replay_share": 0.3,
+  "min_per_class": 100
+}
