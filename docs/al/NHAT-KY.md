@@ -2,8 +2,8 @@
 
 ## 02/11/2026 — các bước chạy được trên CPU (không GPU, không push)
 
-**Khác với plan:** nhánh thật là `relearn-task6` (đã có trên origin), không phải `feat/update-model`. Code mới để chưa
-commit (git trong máy ảo không xoá được file lock khi chưa cho quyền xoá); danh sách file ở cuối.
+**Khác với plan:** nhánh thật là `relearn-task6` (đã có trên origin), không phải `feat/update-model`. Code ở nhánh
+`feat/active-learning` (commit 9bb0100 và commit sau).
 
 ### Bước 0 — khám phá
 - `pred_val.npz` (r1 task 5): top-100 cặp (query, lớp, điểm) mỗi ảnh, 5.792 ảnh val, `ann_md5` khớp `eval/val_full.json`.
@@ -65,3 +65,22 @@ Dữ liệu (ngoài repo): `relearn_fix_v2/active/`, `relearn_fix_v2/variants/al
 1. Thuê GPU cho đợt 1 (7 run × ~1 giờ ước tính) + push nhánh / gửi dữ liệu mới (thư mục `relearn_fix_v2` đã thay đổi:
    cần zip lại hoặc chỉ gửi thêm `active/`, `variants/al_*`, ảnh mới).
 2. B2 (fine-tune thẳng trên r1): cần sửa `full_syn.py` + GPU.
+
+## 02/11/2026 (tối) — hoàn tất code còn lại để máy GPU chỉ việc chạy
+
+- **B2 fine-tune thẳng:** `configs/exp/native/EXP-FULL-SYN-NAIVE.sh` (= EXP-FULL-SYN + `--use_private 0 --pseudo none`,
+  như E1 tháng 9), `full_syn.NAIVE` (seed FSA + task 1 của r1 như M5, bỏ audit nhãn giả, không chấm test),
+  `configs/training/full_syn_naive.json` (cùng 640 px, 16 epoch, batch 8 như r1), `tools/run_naive.py` (train task
+  2..last rồi in bảng quên r1 cạnh NAIVE). Test cấu hình + test dry run (slow, cần torch).
+- **A8 đợt 2:** dựng sẵn 15 gói (B=250, 850 × random×3, margin, margin_k, margin_bal, entropy + entropy_B500).
+- **A9 vòng 2:** `tools/al_round2.py` (model vòng 1 chấm phần pool chưa gán nhãn → chọn thêm B → gói `al_<tên>_r2`, tập
+  gán nhãn cộng dồn); `update_model`: `al_*_r2` học theo công thức round2 từ model vòng 1, so với run vòng 1.
+- **Test2019 một lần cho run AL:** `update_model --stage final_test --variant al_<tên> --confirm-test` (stage riêng
+  `final_test_<tên>`), `tools/al_score.py --test-pred` (ngưỡng calib áp lên test, không ghi đè lần 2).
+- **B4 tham số:** `tools/count_params.py` đọc checkpoint không cần torch: 131,5 triệu tham số; đóng băng 77,4%; khi
+  thêm task chỉ 0,55% train ở `lr` (bảng trong `ket-qua/chi-phi.md`).
+- **Đóng gói:** `scripts/pack_al_data.sh` → `packages_al/relearn_fix_v2_al_20261102.tar` (785 MB) và
+  `seed_full_syn_r1_b2_20261102.tar` (993 MB), md5 trong `packages_al/MD5SUMS_20261102`.
+- **Máy GPU:** `scripts/check_al_setup.sh` (kiểm dữ liệu, md5, torch/CUDA, chạy test có torch, dựng thử 1 gói),
+  `docs/al/RUNBOOK.md` (lệnh từng bước).
+- `scripts/run_al.sh`: thêm `dot2`, tự tạo gói vòng 2, chế độ `test ... --confirm-test`.

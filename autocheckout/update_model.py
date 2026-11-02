@@ -77,9 +77,22 @@ STAGE = N_TASKS  # the improved model is scored as a stage-5 model of the round-
 
 
 def _kind(name: str) -> str:
-    """Hyperparameters, gate and baseline rows of a run: an active-learning variant (``al_<selection>``, built by
-    tools/al_build_variant.py) is trained and gated as the pilot, so only its real images differ."""
-    return 'pilot' if name.startswith('al_') else name
+    """Hyperparameters and gate of a run: an active-learning variant (``al_<selection>``, built by
+    tools/al_build_variant.py) is trained and gated as the pilot, so only its real images differ; its second round
+    (``al_<selection>_r2``, tools/al_round2.py) as round2, from the first round's model."""
+    if name.startswith('al_'):
+        return 'round2' if name.endswith('_r2') else 'pilot'
+    return name
+
+
+def _al_start(plan: dict, name: str) -> tuple[str, str]:
+    """(model to start from, run to compare with) of an active-learning variant."""
+    if not name.endswith('_r2'):
+        return plan['seed_task5'], 'baseline'
+    first = name.removesuffix('_r2')
+    if _done(plan, first) is None:
+        raise RuntimeError(f'{name} starts from {first}: train {first} first')
+    return str(Path(plan['runs']) / f'{EXP}-{first}' / f'task_{STAGE}/task_final.pth'), first
 
 
 # --- plan ---------------------------------------------------------------------------------------------------------
@@ -456,7 +469,8 @@ def stage_data(plan: dict, variant: str) -> dict:
     """Only the training data of one run (no GPU): to check the numbers before renting a machine. Training builds
     the same data again (same seed), so nothing here has to be copied."""
     baseline = _require(plan, 'baseline')
-    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][_kind(variant)]
+    key = 'pilot' if variant.startswith('al_') else variant
+    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][key]
     task_dir, _, manifest = _build_data(plan, variant, rows, baseline['wrong_images'])
     per_row = manifest.get('objects_per_row') or manifest.get('objects_per_weak_sku') or {None: 0}
     trained = load_json(task_dir / 'train_rows.json')
@@ -484,7 +498,10 @@ def stage_train(plan: dict, variant: str) -> dict:
         e1 = _done(plan, 'e1')
         if not e1 or e1['gate']['decision'] != 'stop':
             raise RuntimeError('e2 runs only after the e1 gate said stop (and the user agreed)')
-    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][_kind(variant)]
+    if variant.startswith('al_'):
+        prev, reference = _al_start(plan, variant)
+        return _run_variant(plan, variant, baseline['rows']['pilot'], baseline['wrong_images'], prev, reference)
+    rows = list(_labels(plan)) if variant == 'e2' else baseline['rows'][variant]
     return _run_variant(plan, variant, rows, baseline['wrong_images'], plan['seed_task5'], 'baseline')
 
 
@@ -504,16 +521,23 @@ def stage_round2(plan: dict) -> dict:
     return _run_variant(plan, 'round2', e1['rows'], wrong, str(e1_run / f'task_{STAGE}/task_final.pth'), 'e1')
 
 
-def stage_final_test(plan: dict, confirm: bool = False) -> dict:
-    """Test2019, scored once with the Val-B policies of the last improve run with a go, only with ``confirm=True``."""
+def stage_final_test(plan: dict, confirm: bool = False, variant: str | None = None) -> dict:
+    """Test2019, scored once with the Val-B policies of the last improve run with a go, only with ``confirm=True``.
+    With ``variant`` (an ``al_*`` run, whatever its gate), that run instead, in its own ``final_test_<variant>``."""
     from tools import eval_cl, eval_count
 
-    done = _done(plan, 'final_test')
+    stage = 'final_test' if variant is None else f'final_test_{variant}'
+    done = _done(plan, stage)
     if done:
         print(f'test already scored on {done["finished_at"]}; not recomputed')
         return done
-    chosen = next((v for v in ('round2', 'e1', 'e2') if (_done(plan, v) or {}).get('gate', {}).get('decision')
-                   == 'go'), None)
+    if variant is not None:
+        if not variant.startswith('al_') or _done(plan, variant) is None:
+            raise RuntimeError(f'--variant of final_test must be a trained al_* run, got {variant}')
+        chosen = variant
+    else:
+        chosen = next((v for v in ('round2', 'e1', 'e2') if (_done(plan, v) or {}).get('gate', {}).get('decision')
+                       == 'go'), None)
     if chosen is None and plan['dry_run']:  # gates are not enforced in a dry run: still exercise the test stage
         chosen = next((v for v in ('round2', 'e1', 'e2') if _done(plan, v)), None)
     if chosen is None:
@@ -523,10 +547,13 @@ def stage_final_test(plan: dict, confirm: bool = False) -> dict:
     root, report = Path(plan['root']), load_json(Path(plan['root']) / 'stages' / f'{chosen}.json')
     e1_final = Path(plan['runs']) / f'{EXP}-e1/task_{STAGE}/task_final.pth'
     prev = str(e1_final) if chosen == 'round2' else plan['seed_task5']
-    with _attempt(plan, 'final_test') as (record, attempt):
+    if chosen.startswith('al_'):
+        prev = _al_start(plan, chosen)[0]
+    with _attempt(plan, stage) as (record, attempt):
         variant = _prebuilt(plan, chosen)
         images = variant.parent.parent / 'images' if variant is not None else Path(plan['release_root']) / chosen
-        _train(plan, record, attempt, chosen, _inputs(plan) / chosen, images, prev, VARIANTS[chosen], splits='test')
+        _train(plan, record, attempt, chosen, _inputs(plan) / chosen, images, prev, VARIANTS[_kind(chosen)],
+               splits='test')
     run, target = Path(plan['runs']) / f'{EXP}-{chosen}', root / 'scored' / f'{chosen}_test'
     out = target / f'task_{STAGE}'
     out.mkdir(parents=True, exist_ok=True)
@@ -546,7 +573,7 @@ def stage_final_test(plan: dict, confirm: bool = False) -> dict:
     result = {'stage': 'final_test', 'model': chosen, 'val_b_cAcc_m2': report['cAcc_m2'],
               'test2019': {'AP50': {s: v['m1']['mAP_A']['AP50'] for s, v in detection['stages'].items()},
                            'counting': counting}}
-    return _finish(plan, 'final_test', result, None)
+    return _finish(plan, stage, result, None)
 
 
 STAGES = {'split': stage_split, 'baseline': stage_baseline, 'pilot': lambda p: stage_train(p, 'pilot'),
@@ -562,7 +589,8 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument('--confirm-test', action='store_true', help='with --stage final_test: score test2019 once')
     parser.add_argument('--variant', default='pilot',
                         help='with --stage data: the run whose training data to build (split and baseline run first); '
-                             'with --stage al: the al_<selection> variant to train')
+                             'with --stage al: the al_<selection> variant to train; with --stage final_test: an al_* '
+                             'run to score on test2019 (once)')
     args = parser.parse_args(argv)
     if args.mode == 'new':
         raise NotImplementedError('mode new is Part 2 of the plan (Tasks 8-10)')
@@ -571,7 +599,8 @@ def main(argv: list[str] | None = None) -> dict:
     plan = prepare(load_json(resolve(args.settings)))
     order = ['split', 'baseline', 'pilot', 'e1', 'round2']
     if args.stage == 'final_test':
-        return stage_final_test(plan, confirm=args.confirm_test)
+        return stage_final_test(plan, confirm=args.confirm_test,
+                                variant=args.variant if args.variant.startswith('al_') else None)
     if args.stage == 'data':
         stage_split(plan)
         stage_baseline(plan)

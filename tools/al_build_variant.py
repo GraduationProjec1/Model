@@ -101,6 +101,7 @@ def build(release: Path, selection: str, base: str = 'pilot', copy_images: bool 
                 'fixed_part_md5': fixed_part_md5(train), 'selection': selection,
                 'selection_md5': md5_file(release / f'active/selections/{selection}.json'),
                 'strategy': sel['strategy'], 'budget': sel['budget'], 'seed': sel['seed'],
+                'round': sel.get('opts', {}).get('round', 1),
                 'params': {**base_manifest['params'], 'feedback_repeat': repeat}, 'rows': rows,
                 'images': len(images), 'objects': len(annotations), 'images_per_source': dict(per_source),
                 'labelled_images': len(picked), 'labelled_boxes': sum(len(boxes[i]) for i in picked),

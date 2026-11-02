@@ -106,6 +106,9 @@ FSA, PDP = 'EXP-FULL-SYN-FSA', 'EXP-FULL-SYN'
 # task-1 prototypes stay those of the frozen task-1 features, so past task 2 PPG would compare the teacher's tuned
 # features with stale prototypes: only task 2 runs until they are rebuilt.
 M5, M5_LAST_TASK = 'EXP-FULL-SYN-M5', 2
+# Lower bound (docs/al/PLAN.md, B2): no private pool, no pseudo-labels, tasks 2-5 from the seed's task 1. It has no
+# teacher pseudo-labels to audit, and is scored on val only (its forgetting is the point, not its test score).
+NAIVE = 'EXP-FULL-SYN-NAIVE'
 SEED_POLICIES = ('calibration_count.json', 'calibration_count_m2.json', 'calibration_count_groups.json')
 # M5 pilot against task 2 of its seed (round 1: val cAcc-M2 73.64% on 5,702 images, standard error 0.6 point)
 PILOT_GAIN, PILOT_OLD_DROP = 0.03, 0.01
@@ -169,8 +172,8 @@ def prepare(settings: dict) -> dict:
         if batch < 1 or effective < batch or effective % batch:
             raise ValueError('effective batch must be a positive multiple of physical batch (one GPU)')
     experiment = settings.get('pdp_experiment', PDP)
-    if experiment not in (PDP, M5):
-        raise ValueError(f'pdp_experiment must be {PDP} or {M5}')
+    if experiment not in (PDP, M5, NAIVE):
+        raise ValueError(f'pdp_experiment must be {PDP}, {M5} or {NAIVE}')
     seed = resolve(settings['seed_campaign']) if settings.get('seed_campaign') else None
     if seed is not None and not (seed / 'stages/task1.json').is_file():
         raise FileNotFoundError(f'seed campaign without a task-1 stage: {seed}')
@@ -579,9 +582,9 @@ def stage_tasks(plan: dict, last: int = N_TASKS) -> dict:
     reports = {}
     for task in range(2, last + 1):
         with _attempt(plan, f'task{task}') as (record, attempt):
-            audit = _audit(plan, record, attempt, task)
+            audit = {'all': {}} if experiment == NAIVE else _audit(plan, record, attempt, task)
             precision = audit['all'].get('precision')
-            if task == 2:
+            if task == 2 and experiment != NAIVE:
                 passed = precision is not None and precision >= PSEUDO_PRECISION_MIN
                 gate = _gate(plan, 'pseudo-labels task 2', 'go' if passed else 'stop',
                              f'teacher precision {precision} {">=" if passed else "<"} {PSEUDO_PRECISION_MIN}'
@@ -629,6 +632,8 @@ def stage_final_test(plan: dict) -> dict:
         return load_json(done)
     if _require(plan, 'tasks')['stage'] != N_TASKS:
         raise RuntimeError(f'test is scored after task {N_TASKS} only')
+    if plan['pdp_experiment'] == NAIVE:
+        raise RuntimeError(f'{NAIVE} is a lower bound scored on val only')
     experiment = plan['pdp_experiment']
     run = Path(plan['runs']) / experiment
     with _attempt(plan, 'final_test') as (record, attempt):

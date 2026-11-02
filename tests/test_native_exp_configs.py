@@ -139,6 +139,13 @@ def test_full_syn_m5_config_only_adds_feature_tuning():
     assert m5.tune_after_task1 == "stages_3,encoder" and m5.feature_kd == 1
 
 
+def test_full_syn_naive_config_only_turns_off_private_pool_and_pseudo_labels():
+    _, pdp = resolved_args("EXP-FULL-SYN", FSA_HF="/fixture/fsa/task_1/hf_model")
+    _, naive = resolved_args("EXP-FULL-SYN-NAIVE", FSA_HF="/fixture/fsa/task_1/hf_model")
+    assert {k for k in vars(pdp) if getattr(naive, k) != getattr(pdp, k)} == {"use_private", "pseudo"}
+    assert naive.use_private == 0 and naive.pseudo == "none"
+
+
 def test_full_syn_rl_config_only_sets_the_class_count():
     _, pdp = resolved_args("EXP-FULL-SYN", FSA_HF="/fixture/fsa/task_1/hf_model")
     _, rl = resolved_args("EXP-FULL-SYN-RL", FSA_HF="/fixture/fsa/task_1/hf_model")

@@ -24,9 +24,17 @@ Học tăng dần của r1 (PDP) không replay ảnh cũ: kiến thức cũ gi�
 Nguồn: `relearn_fix_v2/variants/al_margin_B500/train_task_5_fix.json`, kích thước file thật.
 Giờ GPU của một gói: chưa đo (runbook ước ~1 giờ cho pilot 4 epoch; sẽ ghi sau đợt GPU 1).
 
-## Số tham số được train
-Chưa đếm (máy này không có torch). Đếm trên máy GPU: tổng tham số của checkpoint so với `prompts.private_*` + các hàng
-`class_embed` của `train_rows` (mode improve) / prompt riêng task mới + `class_embed` (task mới).
+## Số tham số được train (`python -m tools.count_params <task_final.pth>`, đọc checkpoint r1 task 5)
+
+| | Tham số | Tỉ lệ |
+|---|---|---|
+| Tổng model | 131,5 triệu | 100% |
+| Đóng băng (backbone, encoder, decoder, prompt riêng của task cũ) | 101,8 triệu | 77,4% |
+| Train ở `lr_old` (10× nhỏ hơn): `query_tf`, `input_proj`, prompt chung, `bbox_embed`, ... | 29,0 triệu | 22,0% |
+| Train ở `lr` khi thêm 25 SKU (prompt riêng task mới + 25 hàng `class_embed`) | 0,73 triệu | **0,55%** |
+| Train ở `lr` khi học lại 17 SKU (prompt riêng task 5 + 17 hàng `class_embed`) | 0,71 triệu | **0,54%** |
+
+Train lại từ đầu thì cập nhật cả 131,5 triệu (gồm backbone, qua FSA).
 
 ## Ghi chú trung thực
 Gói học lại có replay 30% ảnh ghép của task cũ → đây là học tăng dần **có replay nhỏ** (2.273 ảnh, ~3% số ảnh của train

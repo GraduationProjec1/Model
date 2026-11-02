@@ -25,10 +25,10 @@ def collect(release: Path, campaign: Path) -> list[dict]:
         manifest = release / 'variants' / name / 'manifest.json'
         if manifest.is_file():
             m = load_json(manifest)
-            row.update(strategy=m['strategy'], budget=m['budget'], seed=m['seed'],
+            row.update(strategy=m['strategy'], budget=m['budget'], seed=m['seed'], round=m.get('round', 1),
                        labelled_images=m['labelled_images'], labelled_boxes=m['labelled_boxes'])
         else:
-            row.update(strategy='baseline', budget=0, seed=None, labelled_images=0, labelled_boxes=0)
+            row.update(strategy='baseline', budget=0, seed=None, round=0, labelled_images=0, labelled_boxes=0)
         stage = campaign / 'stages' / f'{name}.json'
         if stage.is_file():
             st = load_json(stage)
@@ -41,15 +41,16 @@ def collect(release: Path, campaign: Path) -> list[dict]:
 
 
 def table(rows: list[dict], base: float | None) -> str:
-    head = ('| Run | Chiến lược | B | seed | cAcc Val-B (ngưỡng calib) | Δ so với r1 | cAcc (ngưỡng Val-B) | '
+    head = ('| Run | Chiến lược | Vòng | B | seed | cAcc Val-B (ngưỡng calib) | Δ so với r1 | cAcc (ngưỡng Val-B) | '
             'AP50 SKU khác (trước→sau) | Nhầm trong 17 SKU | Ảnh / box gán nhãn | Cổng |')
-    lines = [head, '|' + '---|' * 11]
+    lines = [head, '|' + '---|' * 12]
     fmt = lambda v, p='.4f': '' if v is None else format(v, p)  # noqa: E731
-    for r in sorted(rows, key=lambda r: (r['budget'], r['strategy'], r['seed'] or 0)):
+    for r in sorted(rows, key=lambda r: (r['round'], r['budget'], r['strategy'], r['seed'] or 0)):
         delta = None if base is None else r['cAcc_calib'] - base
         ap = '' if 'AP50_other_new' not in r else f"{fmt(r['AP50_other_base'])}→{fmt(r['AP50_other_new'])}"
         pairs = '' if r.get('pairs_new') is None else f"{r['pairs_base']}→{r['pairs_new']}"
-        lines.append(f"| {r['name']} | {r['strategy']} | {r['budget']} | {'' if r['seed'] is None else r['seed']} | "
+        lines.append(f"| {r['name']} | {r['strategy']} | {r['round']} | {r['budget']} | "
+                     f"{'' if r['seed'] is None else r['seed']} | "
                      f"{fmt(r['cAcc_calib'])} | {fmt(delta, '+.4f')} | {fmt(r.get('cAcc_valb_policy'))} | {ap} | "
                      f"{pairs} | {r['labelled_images']} / {r['labelled_boxes']} | {r.get('gate') or ''} |")
     return '\n'.join(lines)
@@ -62,7 +63,7 @@ def curve(rows: list[dict], base: float | None, path: Path) -> None:
 
     series = defaultdict(lambda: defaultdict(list))
     for r in rows:
-        if r['strategy'] not in ('baseline', 'oracle', 'all'):
+        if r['strategy'] not in ('baseline', 'oracle', 'all') and r['round'] == 1:
             series[r['strategy']][r['budget']].append(r['cAcc_calib'])
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for strategy in sorted(series):

@@ -83,5 +83,43 @@ def test_report_table_and_curve(tmp_path):
     rows = al_report.main(['--release', str(rel), '--campaign', str(campaign)])
     assert len(rows) == 5
     md = (rel / 'active/report/al_results.md').read_text()
-    assert '| al_margin_B10 | margin | 10 |' in md and '+0.0500' in md and '50→20' in md and '| go |' in md
+    assert '| al_margin_B10 | margin | 1 | 10 |' in md and '+0.0500' in md and '50→20' in md and '| go |' in md
     assert (rel / 'active/report/al_curve.png').stat().st_size > 1000
+
+
+def test_round2_adds_new_pool_images_to_the_labelled_set(release, tmp_path):
+    import numpy as np
+
+    from autocheckout.predictions import Predictions, save_predictions
+    from tools import al_round2
+
+    _w(release / 'active/selections/m.json', {'strategy': 'margin', 'budget': 2, 'seed': None, 'opts': {},
+                                              'pool_md5': 'x', 'image_ids': [2, 3]})
+    bv.build(release, 'm')
+    campaign = tmp_path / 'camp'
+    ids = [1, 2, 3, 4, 5, 6, 7, 8]  # predictions on all of val; calib images (6, 7) must never be picked
+    margins = {1: 0.2, 2: 0.0, 3: 0.0, 4: 0.1, 5: 0.9, 6: 0.0, 7: 0.0, 8: 0.95}  # 8 is a test file
+    rows = [(i, 0, 0, 0.9, [0, 0, 5, 5]) for i in ids] + [(i, 0, 1, 0.9 - margins[i], [0, 0, 5, 5]) for i in ids]
+    image, query, label, score, boxes = zip(*rows, strict=True)
+    save_predictions(campaign / 'runs/EXP-FB-FT-al_m/task_5/pred_val.npz',
+                     Predictions(np.array(image), np.array(query), np.array(label), np.array(score), np.array(boxes)))
+    manifest = al_round2.round2(release, campaign, 'al_m')
+    chosen = load_json(release / 'active/selections/m_r2.json')
+    assert chosen['image_ids'] == [2, 3, 4, 1] and chosen['new_image_ids'] == [4, 1]
+    assert manifest['variant'] == 'al_m_r2' and manifest['round'] == 2 and manifest['labelled_images'] == 4
+    with pytest.raises(ValueError):
+        al_round2.round2(release, campaign, 'al_m_r2')
+
+
+def test_update_model_al_recipes_and_start(tmp_path):
+    from autocheckout import update_model as um
+
+    assert um._kind('al_margin_B500') == 'pilot' and um._kind('al_margin_B500_r2') == 'round2'
+    assert um._kind('e1') == 'e1'
+    plan = {'seed_task5': 'seed.pth', 'root': str(tmp_path), 'runs': str(tmp_path / 'runs')}
+    assert um._al_start(plan, 'al_x') == ('seed.pth', 'baseline')
+    with pytest.raises(RuntimeError, match='train al_x first'):
+        um._al_start(plan, 'al_x_r2')
+    _w(tmp_path / 'stages/al_x.json', {'cAcc_m2': 0.5})
+    prev, reference = um._al_start(plan, 'al_x_r2')
+    assert reference == 'al_x' and prev.endswith('runs/EXP-FB-FT-al_x/task_5/task_final.pth')

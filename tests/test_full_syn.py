@@ -211,6 +211,27 @@ def test_m5_pilot_reuses_fsa_and_task1_of_its_seed_and_stops_after_task_2(tmp_pa
         full_syn.stage_final_test(plan)
 
 
+@pytest.mark.slow
+def test_naive_lower_bound_reuses_task1_skips_the_audit_and_is_never_tested(tmp_path):
+    """B2 (docs/al/PLAN.md): EXP-FULL-SYN-NAIVE seeds FSA and task 1 like M5, trains task 2 without private pool and
+    pseudo-labels (no teacher audit), and refuses the final test."""
+    from autocheckout import full_syn
+    base = dict(round=1, artifact_root=str(tmp_path), dry_run=True, batch_size=1, effective_batch=2,
+                resolution=640, fsa_epochs=8, epochs=16, audit_images=4)
+    seed = full_syn.prepare({**base, 'campaign_id': 'seed'})
+    full_syn.stage_fsa(seed)
+    full_syn.stage_task1(seed)
+    plan = full_syn.prepare({**base, 'campaign_id': 'naive', 'pdp_experiment': full_syn.NAIVE,
+                             'seed_campaign': str(tmp_path / 'dry_run/seed')})
+    full_syn.stage_seed(plan)
+    report = full_syn.stage_tasks(plan, last=2)
+    run = tmp_path / 'dry_run/naive/runs' / full_syn.NAIVE
+    assert set(report['tasks']) == {2} and not (run / 'task_2/ppg_audit.json').exists()
+    cli = load_json(run / 'resolved_cli.json')['arguments']
+    assert cli[cli.index('--use_private') + 1] == '0' and cli[cli.index('--pseudo') + 1] == 'none'
+    assert (run / 'task_2/task_final.pth').is_file()
+
+
 def load_json(path):
     return json.loads(path.read_text())
 
