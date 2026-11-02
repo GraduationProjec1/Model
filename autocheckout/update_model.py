@@ -67,10 +67,14 @@ GATES = {
 # for an SKU the relearn release covers, from v2 for an SKU it does not. Without these keys every synthetic image
 # holding a retrained SKU is taken (the first version: 29,539 v2 images for the pilot rows, 62,061 for e1).
 QUOTA_KEYS = {'quota_relearn': 600, 'quota_v2': 300, 'quota_v2_only': 600}
-# settings 'data_root' (or env RELEARN_DATA_ROOT): one self-contained data folder made by build_relearn_data.py
-# --self-contained, e.g. relearn_fix_v1 next to the repo. Keys set in the settings win over this layout.
-DATA_ROOT_LAYOUT = {'eval_root': 'eval', 'raw_root': 'archive', 'seed_campaign': 'seed/full-syn-r1',
-                    'pretrained_root': 'pretrained/hf-cache', 'prebuilt_release': '.', 'synth_v2_root': 'images/v2'}
+# settings 'data_root' (or env AC_DATA / RELEARN_DATA_ROOT): the data folder. Its layout is the one data folder of
+# autocheckout/datapaths.py (../autocheckout-data: eval/, rpc/, models/full-syn-r1/, relearn/, ...), or a legacy
+# self-contained folder made by build_relearn_data.py --self-contained (relearn_fix_v1). Keys set in the settings win.
+DATA_ROOT_LAYOUT = {'eval_root': 'eval', 'raw_root': 'rpc', 'seed_campaign': 'models/full-syn-r1',
+                    'pretrained_root': 'pretrained/hf-cache', 'prebuilt_release': 'relearn',
+                    'synth_v2_root': 'synth_v2'}
+LEGACY_LAYOUT = {'eval_root': 'eval', 'raw_root': 'archive', 'seed_campaign': 'seed/full-syn-r1',
+                 'pretrained_root': 'pretrained/hf-cache', 'prebuilt_release': '.', 'synth_v2_root': 'images/v2'}
 STAGE = N_TASKS  # the improved model is scored as a stage-5 model of the round-1 config
 
 
@@ -97,12 +101,16 @@ def _al_start(plan: dict, name: str) -> tuple[str, str]:
 
 # --- plan ---------------------------------------------------------------------------------------------------------
 def with_data_root(settings: dict) -> dict:
-    """The paths of a self-contained data folder (``DATA_ROOT_LAYOUT``) for the keys the settings leave out."""
-    root = os.environ.get('RELEARN_DATA_ROOT') or settings.get('data_root')
+    """The paths of the data folder (``DATA_ROOT_LAYOUT``, else ``LEGACY_LAYOUT``) for the keys the settings leave
+    out."""
+    from autocheckout.training_workflow import resolve
+
+    root = os.environ.get('AC_DATA') or os.environ.get('RELEARN_DATA_ROOT') or settings.get('data_root')
     if not root:
         return settings
-    layout = {k: str(Path(root) / v) for k, v in DATA_ROOT_LAYOUT.items()}
-    return {**layout, **{k: v for k, v in settings.items() if not (k in layout and v is None)}}
+    layout = DATA_ROOT_LAYOUT if (resolve(root) / 'relearn').is_dir() else LEGACY_LAYOUT
+    paths = {k: str(Path(root) / v) for k, v in layout.items()}
+    return {**paths, **{k: v for k, v in settings.items() if not (k in paths and v is None)}}
 
 
 def prepare(settings: dict) -> dict:

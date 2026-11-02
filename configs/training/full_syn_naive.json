@@ -3,10 +3,6 @@
   "round": 1,
   "artifact_root": "data/training",
   "dry_run": false,
-  "release_root": "data/processed/rpc_synth_v2_v1",
-  "eval_root": "data/processed/rpc_eval_official_v1",
-  "raw_root": "data/archive",
-  "pretrained_root": "data/pretrained/hf-cache",
   "resolution": 640,
   "batch_size": 8,
   "effective_batch": 8,
@@ -18,5 +14,5 @@
   "checkpoint_every_minutes": 2,
   "audit_images": 1000,
   "pdp_experiment": "EXP-FULL-SYN-NAIVE",
-  "seed_campaign": "data/training/full-syn-r1"
+  "_paths": "filled by tools/run_naive.py from the data folder (autocheckout/datapaths.py)"
 }

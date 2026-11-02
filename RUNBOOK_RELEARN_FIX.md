@@ -1,5 +1,9 @@
 # Runbook — học lại (mode improve) với thư mục dữ liệu `relearn_fix_v2` (02/11/2026)
 
+> **Cập nhật 02/11 (đêm):** dữ liệu giờ nằm trong một thư mục chung `../autocheckout-data` (xem
+> `autocheckout-data/README.md`, `autocheckout/datapaths.py`); `relearn_fix_v2` cũ = `autocheckout-data/relearn` + các
+> phần dùng chung. Lệnh chạy giữ nguyên (`bash scripts/run_relearn_fix.sh ...`); runbook GPU mới: `docs/al/RUNBOOK.md`.
+
 **Bản dùng chính: `relearn_fix_v2`** (13 GB) = ảnh ghép đủ mặt của task 6–7 (`rpc_synth_relearn_v1`, 600 vật/SKU)
 + ảnh ghép v2 (300 vật/SKU, 600 nếu SKU chưa có ảnh đủ mặt) + ảnh quầy thật Val-A x3 + replay 30%, nhãn thật 100%.
 

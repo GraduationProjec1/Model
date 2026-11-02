@@ -1,12 +1,12 @@
 """A4: training data of one active-learning selection, as a prebuilt variant the improve mode reads
-(``update_model._prebuilt_data``): ``<release>/variants/al_<selection>/``.
+(``update_model._prebuilt_data``): ``<data>/relearn/variants/al_<selection>/``.
 
 The fixed part (synthetic images, replay, ``train_rows.json``) is copied from the base variant unchanged; only the
 real images change: the selected Val-A images, every object labelled, each repeated ``feedback_repeat`` times as in
-the base. Selected images missing from ``images/real/val2019`` are copied from ``archive/val2019``. The build stops
-when a Val-B, calib or test image would enter the training file.
+the base. Selected images missing from ``relearn/images/real/val2019`` are linked (else copied) from ``rpc/val2019``.
+The build stops when a Val-B, calib or test image would enter the training file.
 
-    python -m tools.al_build_variant --release ../relearn_fix_v2 --selection margin_B500
+    python -m tools.al_build_variant --selection margin_B500
 """
 
 from __future__ import annotations
@@ -14,10 +14,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 from collections import defaultdict
 from pathlib import Path
 
+from autocheckout.datapaths import Layout
 from autocheckout.io import load_json, md5_file, save_json
 
 
@@ -30,14 +32,23 @@ def fixed_part_md5(coco: dict) -> str:
     return hashlib.md5(json.dumps(items).encode()).hexdigest()
 
 
-def build(release: Path, selection: str, base: str = 'pilot', copy_images: bool = True) -> dict:
+def _link_or_copy(source: Path, target: Path) -> None:
+    try:
+        os.link(source, target)  # same disk: no second copy (and one copy in a tar of the data folder)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_images: bool = True) -> dict:
+    data = Layout.at(data_root)
+    release = data.relearn
     sel = load_json(release / f'active/selections/{selection}.json')
     split = load_json(release / 'active/splits/val_a_split.json')
     base_dir = release / 'variants' / base
     base_train, base_manifest = load_json(base_dir / 'train_task_5_fix.json'), load_json(base_dir / 'manifest.json')
     repeat = int(base_manifest['params']['feedback_repeat'])
     val_a, val_b = load_json(release / 'meta/val_a.json'), load_json(release / 'meta/val_b.json')
-    test_names = {Path(i['file_name']).name for i in load_json(release / 'eval/test_full.json')['images']}
+    test_names = {Path(i['file_name']).name for i in load_json(data.eval / 'test_full.json')['images']}
 
     picked = list(dict.fromkeys(sel['image_ids']))
     blocked = {i['id'] for i in val_b['images']} | set(split['calib'])
@@ -81,7 +92,7 @@ def build(release: Path, selection: str, base: str = 'pilot', copy_images: bool 
         target.mkdir(parents=True, exist_ok=True)
         for name in names.values():
             if not (target / name).is_file():
-                shutil.copy2(release / 'archive/val2019' / name, target / name)
+                _link_or_copy(data.rpc / 'val2019' / name, target / name)
                 copied += 1
 
     out = release / 'variants' / f'al_{selection}'
@@ -114,11 +125,11 @@ def build(release: Path, selection: str, base: str = 'pilot', copy_images: bool 
 
 def main(argv: list[str] | None = None) -> list[dict]:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--release', type=Path, required=True)
+    ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
     ap.add_argument('--selection', nargs='+', required=True)
     ap.add_argument('--base', default='pilot')
     args = ap.parse_args(argv)
-    return [build(args.release, s, args.base) for s in args.selection]
+    return [build(args.data, s, args.base) for s in args.selection]
 
 
 if __name__ == '__main__':

@@ -11,7 +11,9 @@
 # Bị ngắt thì chạy lại đúng lệnh: run đã có stages/<tên>.json được bỏ qua, điểm đã có cũng bỏ qua.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-DATA=$(cd "${RELEARN_DATA_ROOT:-$REPO/../relearn_fix_v2}" && pwd)
+# Thư mục dữ liệu chung (autocheckout/datapaths.py): ../autocheckout-data cạnh repo, hoặc AC_DATA=/duong/dan.
+DATA=$(cd "${AC_DATA:-$REPO/../autocheckout-data}" && pwd)
+REL=$DATA/relearn
 SETTINGS=${SETTINGS:-$REPO/configs/training/update_model_relearn_fix_v2.json}
 CAMPAIGN=${CAMPAIGN:-$REPO/data/training/update-model/relearn-fix-v2}
 DOT1=(al_random_B500_s0 al_random_B500_s1 al_random_B500_s2 al_margin_B500 al_margin_k_B500 al_margin_bal_B500
@@ -38,7 +40,7 @@ done
 [[ ${#VARIANTS[@]} -gt 0 ]] || { echo "cần dot1, dot2 hoặc tên al_<selection>" >&2; exit 2; }
 
 cd "$REPO"
-export RELEARN_DATA_ROOT=$DATA
+export AC_DATA=$DATA
 mkdir -p data/training/update-model
 LOG=data/training/update-model/run_al.log
 um() { python -m autocheckout.update_model --mode improve --settings "$SETTINGS" "$@" 2>&1 | tee -a "$LOG"; }
@@ -47,7 +49,7 @@ if [[ $TEST == 1 ]]; then
     [[ $CONFIRM == 1 ]] || { echo "test2019 chỉ chấm MỘT lần: thêm --confirm-test khi nhóm đã chốt" >&2; exit 2; }
     for v in "${VARIANTS[@]}"; do
         um --stage final_test --variant "$v" --confirm-test
-        python -m tools.al_score --release "$DATA" --name "$v" \
+        python -m tools.al_score --name "$v" \
             --pred "$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_val.npz" \
             --test-pred "$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_test.npz" 2>&1 | tee -a "$LOG"
     done
@@ -55,11 +57,11 @@ if [[ $TEST == 1 ]]; then
 fi
 
 for v in "${VARIANTS[@]}"; do
-    if [[ ! -f $DATA/variants/$v/train_task_5_fix.json ]]; then
+    if [[ ! -f $REL/variants/$v/train_task_5_fix.json ]]; then
         if [[ $v == *_r2 ]]; then
-            python -m tools.al_round2 --release "$DATA" --campaign "$CAMPAIGN" --from "${v%_r2}" 2>&1 | tee -a "$LOG"
+            python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r2}" 2>&1 | tee -a "$LOG"
         else
-            python -m tools.al_build_variant --release "$DATA" --selection "${v#al_}" 2>&1 | tee -a "$LOG"
+            python -m tools.al_build_variant --selection "${v#al_}" 2>&1 | tee -a "$LOG"
         fi
     fi
     if [[ $DRY == 1 ]]; then
@@ -69,8 +71,8 @@ for v in "${VARIANTS[@]}"; do
     echo "=== $(date -u +%FT%TZ) $v" | tee -a "$LOG"
     um --stage al --variant "$v"
     PRED=$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_val.npz
-    if [[ -f $PRED && ! -f $DATA/active/scored/$v.json ]]; then
-        python -m tools.al_score --release "$DATA" --name "$v" --pred "$PRED" 2>&1 | tee -a "$LOG"
+    if [[ -f $PRED && ! -f $REL/active/scored/$v.json ]]; then
+        python -m tools.al_score --name "$v" --pred "$PRED" 2>&1 | tee -a "$LOG"
     fi
 done
-[[ $DRY == 1 ]] || python -m tools.al_report --release "$DATA" --campaign "$CAMPAIGN" 2>&1 | tail -3 | tee -a "$LOG"
+[[ $DRY == 1 ]] || python -m tools.al_report --campaign "$CAMPAIGN" 2>&1 | tail -3 | tee -a "$LOG"

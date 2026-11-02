@@ -23,15 +23,16 @@ def _w(path, obj):
 
 @pytest.fixture
 def release(tmp_path):
-    rel = tmp_path / 'rel'
+    data = tmp_path / 'data'  # the data folder layout of autocheckout/datapaths.py
+    rel = data / 'relearn'
     val_a = _coco([{'id': i, 'file_name': f'val2019/a{i}.jpg', 'width': 10, 'height': 10, 'level': 'easy'}
                    for i in range(1, 9)])
     _w(rel / 'meta/val_a.json', val_a)
     _w(rel / 'meta/val_b.json', _coco([{'id': 20, 'file_name': 'val2019/b20.jpg', 'width': 10, 'height': 10}]))
-    _w(rel / 'eval/test_full.json', _coco([{'id': 30, 'file_name': 'test2019/a8.jpg', 'width': 10, 'height': 10}]))
+    _w(data / 'eval/test_full.json', _coco([{'id': 30, 'file_name': 'test2019/a8.jpg', 'width': 10, 'height': 10}]))
     for i in range(1, 9):
-        (rel / 'archive/val2019').mkdir(parents=True, exist_ok=True)
-        (rel / f'archive/val2019/a{i}.jpg').write_bytes(b'x')
+        (data / 'rpc/val2019').mkdir(parents=True, exist_ok=True)
+        (data / f'rpc/val2019/a{i}.jpg').write_bytes(b'x')
     base = _coco([{'id': 1, 'file_name': 'real/val2019/a1.jpg', 'width': 10, 'height': 10, 'orig_id': 1,
                    'source': 'real'},
                   {'id': 2, 'file_name': 'v2/task_1/9.jpg', 'width': 10, 'height': 10, 'orig_id': 9, 'source': 'v2'},
@@ -43,20 +44,20 @@ def release(tmp_path):
     _w(rel / 'active/splits/val_a_split.json', {'pool': [1, 2, 3, 4, 5, 8], 'calib': [6, 7]})
     for name, ids in {'s1': [2, 3], 's2': [4, 5], 'bad_calib': [2, 6], 'bad_test': [8]}.items():
         _w(rel / f'active/selections/{name}.json', {'strategy': 'x', 'budget': len(ids), 'seed': 0, 'image_ids': ids})
-    return rel
+    return data
 
 
 def test_fixed_part_is_kept_and_real_images_repeat(release):
     m1, m2 = bv.build(release, 's1'), bv.build(release, 's2')
     assert m1['fixed_part_md5'] == m2['fixed_part_md5']
     assert m1['images_per_source'] == {'real': 6, 'v2': 1, 'relearn': 1}
-    train = load_json(release / 'variants/al_s1/train_task_5_fix.json')
+    train = load_json(release / 'relearn/variants/al_s1/train_task_5_fix.json')
     real = [i for i in train['images'] if i['source'] == 'real']
     assert sorted(i['orig_id'] for i in real) == [2, 2, 2, 3, 3, 3]
     assert len({i['id'] for i in train['images']}) == len(train['images'])
     assert {a['image_id'] for a in train['annotations']} == {i['id'] for i in train['images']}
-    assert (release / 'images/real/val2019/a2.jpg').is_file() and m1['images_copied'] == 2
-    assert load_json(release / 'variants/al_s1/train_rows.json') == [1, 2]
+    assert (release / 'relearn/images/real/val2019/a2.jpg').is_file() and m1['images_copied'] == 2
+    assert load_json(release / 'relearn/variants/al_s1/train_rows.json') == [1, 2]
 
 
 @pytest.mark.parametrize('name', ['bad_calib', 'bad_test'])
@@ -68,7 +69,8 @@ def test_leaks_are_refused(release, name):
 def test_report_table_and_curve(tmp_path):
     from tools import al_report
 
-    rel, campaign = tmp_path / 'rel', tmp_path / 'camp'
+    data, campaign = tmp_path / 'rel', tmp_path / 'camp'
+    rel = data / 'relearn'
     _w(rel / 'active/scored/baseline_r1.json', {'name': 'baseline_r1', 'cAcc_m2': 0.40})
     for name, strategy, budget, seed, cacc in [('al_random_B10_s0', 'random', 10, 0, 0.41),
                                                 ('al_random_B10_s1', 'random', 10, 1, 0.43),
@@ -80,7 +82,7 @@ def test_report_table_and_curve(tmp_path):
     _w(campaign / 'stages/al_margin_B10.json', {'cAcc_m2': 0.46, 'AP50_other': {'base': 0.9, 'new': 0.89},
                                                'comparison': {'pair_confusions_in_rows': {'base': 50, 'new': 20}},
                                                'gate': {'decision': 'go'}})
-    rows = al_report.main(['--release', str(rel), '--campaign', str(campaign)])
+    rows = al_report.main(['--data', str(data), '--campaign', str(campaign)])
     assert len(rows) == 5
     md = (rel / 'active/report/al_results.md').read_text()
     assert '| al_margin_B10 | margin | 1 | 10 |' in md and '+0.0500' in md and '50→20' in md and '| go |' in md
@@ -93,7 +95,7 @@ def test_round2_adds_new_pool_images_to_the_labelled_set(release, tmp_path):
     from autocheckout.predictions import Predictions, save_predictions
     from tools import al_round2
 
-    _w(release / 'active/selections/m.json', {'strategy': 'margin', 'budget': 2, 'seed': None, 'opts': {},
+    _w(release / 'relearn/active/selections/m.json', {'strategy': 'margin', 'budget': 2, 'seed': None, 'opts': {},
                                               'pool_md5': 'x', 'image_ids': [2, 3]})
     bv.build(release, 'm')
     campaign = tmp_path / 'camp'
@@ -104,7 +106,7 @@ def test_round2_adds_new_pool_images_to_the_labelled_set(release, tmp_path):
     save_predictions(campaign / 'runs/EXP-FB-FT-al_m/task_5/pred_val.npz',
                      Predictions(np.array(image), np.array(query), np.array(label), np.array(score), np.array(boxes)))
     manifest = al_round2.round2(release, campaign, 'al_m')
-    chosen = load_json(release / 'active/selections/m_r2.json')
+    chosen = load_json(release / 'relearn/active/selections/m_r2.json')
     assert chosen['image_ids'] == [2, 3, 4, 1] and chosen['new_image_ids'] == [4, 1]
     assert manifest['variant'] == 'al_m_r2' and manifest['round'] == 2 and manifest['labelled_images'] == 4
     with pytest.raises(ValueError):

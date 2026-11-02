@@ -3,8 +3,7 @@ yet; the same strategy picks ``budget`` more; the labelled set grows to both rou
 ``<selection>_r2``) and its variant ``al_<selection>_r2`` is built. Train it with
 ``update_model --stage al --variant al_<selection>_r2`` (round2 recipe, from the first-round model).
 
-    python -m tools.al_round2 --release ../relearn_fix_v2 --campaign data/training/update-model/relearn-fix-v2 \\
-        --from al_margin_k_B500
+    python -m tools.al_round2 --from al_margin_k_B500
 """
 
 from __future__ import annotations
@@ -16,12 +15,16 @@ from pathlib import Path
 
 from autocheckout.active import select as sel
 from autocheckout.active.uncertainty import image_scores
+from autocheckout.datapaths import REPO, Layout
 from autocheckout.io import load_json, md5_file, save_json
 from autocheckout.predictions import load_predictions
 from tools import al_build_variant
 
+DEFAULT_CAMPAIGN = REPO / 'data/training/update-model/relearn-fix-v2'
 
-def round2(release: Path, campaign: Path, first: str, budget: int | None = None) -> dict:
+
+def round2(data_root: Path | None, campaign: Path, first: str, budget: int | None = None) -> dict:
+    release = Layout.at(data_root).relearn
     if not first.startswith('al_') or first.endswith('_r2'):
         raise ValueError(f'--from must be a first-round al_* run, got {first}')
     name = first.removeprefix('al_')
@@ -47,17 +50,18 @@ def round2(release: Path, campaign: Path, first: str, budget: int | None = None)
                'created_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
                'image_ids': labelled + new, 'new_image_ids': new,
                'per_image_score': chosen.get('per_image_score', []) + [by_id[i] for i in new]})
-    return al_build_variant.build(release, target)
+    return al_build_variant.build(data_root, target)
 
 
 def main(argv: list[str] | None = None) -> dict:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--release', type=Path, required=True)
-    ap.add_argument('--campaign', type=Path, required=True)
+    ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
+    ap.add_argument('--campaign', type=Path, default=DEFAULT_CAMPAIGN,
+                    help='campaign folder of update_model (default: data/training/update-model/relearn-fix-v2)')
     ap.add_argument('--from', dest='first', required=True, help='first-round run, e.g. al_margin_k_B500')
     ap.add_argument('--budget', type=int, help='images added in round 2 (default: the first round budget)')
     args = ap.parse_args(argv)
-    return round2(args.release, args.campaign, args.first, args.budget)
+    return round2(args.data, args.campaign, args.first, args.budget)
 
 
 if __name__ == '__main__':

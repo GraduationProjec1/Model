@@ -1,9 +1,9 @@
 """A5: cAcc of a task-5 model on Val-B with counting thresholds chosen on Val-A-calib (never on Val-B, never on an
 image any AL selection may train on). One threshold per task group (``select_group_thresholds``), NMS 0.45, as the
-FULL-SYN policies. Writes ``<release>/active/scored/<name>.json``.
+FULL-SYN policies. Writes ``<data>/relearn/active/scored/<name>.json``.
 
-    python -m tools.al_score --release ../relearn_fix_v2 --name baseline_r1 \\
-        --pred ../relearn_fix_v2/seed/full-syn-r1/runs/EXP-FULL-SYN/task_5/pred_val.npz
+    python -m tools.al_score --name baseline_r1 \\
+        --pred ../autocheckout-data/models/full-syn-r1/runs/EXP-FULL-SYN/task_5/pred_val.npz
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from autocheckout.counting import (
     label_thresholds,
     select_group_thresholds,
 )
+from autocheckout.datapaths import Layout
 from autocheckout.feedback_fix import subset
 from autocheckout.io import load_json, md5_file, save_json
 from autocheckout.predictions import Predictions, load_predictions
@@ -63,18 +64,19 @@ def score(val_full: dict, cfg: TaskConfig, preds: Predictions, calib: list[int],
 
 def main(argv: list[str] | None = None) -> dict:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--release', type=Path, required=True)
+    ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
     ap.add_argument('--pred', type=Path, required=True, help='task_5/pred_val.npz of the model (all of val)')
     ap.add_argument('--name', required=True)
     ap.add_argument('--test-pred', type=Path, help='task_5/pred_test.npz: also score test2019 (once) with the same '
                                                    'thresholds, into active/scored_test/<name>.json')
     args = ap.parse_args(argv)
-    rel = args.release
-    val_full = load_json(rel / 'eval/val_full.json')
+    data = Layout.at(args.data)
+    rel = data.relearn
+    val_full = load_json(data.eval / 'val_full.json')
     preds = load_predictions(args.pred)
-    if preds.meta.get('ann_md5') not in (None, md5_file(rel / 'eval/val_full.json')):
+    if preds.meta.get('ann_md5') not in (None, md5_file(data.eval / 'val_full.json')):
         raise ValueError(f'{args.pred} was not predicted on eval/val_full.json')
-    cfg = TaskConfig.load(rel / 'eval/task_config.json')
+    cfg = TaskConfig.load(data.eval / 'task_config.json')
     calib = load_json(rel / 'active/splits/val_a_split.json')['calib']
     val_b = sorted(i['id'] for i in load_json(rel / 'meta/val_b.json')['images'])
     result = {'name': args.name, 'pred': str(args.pred), 'pred_md5': md5_file(args.pred),
@@ -84,9 +86,9 @@ def main(argv: list[str] | None = None) -> dict:
         out = rel / f'active/scored_test/{args.name}.json'
         if out.is_file():
             raise FileExistsError(f'{out}: test2019 is scored once')
-        test_full = load_json(rel / 'eval/test_full.json')
+        test_full = load_json(data.eval / 'test_full.json')
         test = load_predictions(args.test_pred)
-        if test.meta.get('ann_md5') not in (None, md5_file(rel / 'eval/test_full.json')):
+        if test.meta.get('ann_md5') not in (None, md5_file(data.eval / 'test_full.json')):
             raise ValueError(f'{args.test_pred} was not predicted on eval/test_full.json')
         thresholds = [result['thresholds'][f'task_{t}'] for t in range(1, STAGE + 1)]
         save_json(out, {'name': args.name, 'pred': str(args.test_pred), 'thresholds': result['thresholds'],

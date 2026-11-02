@@ -84,3 +84,18 @@ Dữ liệu (ngoài repo): `relearn_fix_v2/active/`, `relearn_fix_v2/variants/al
 - **Máy GPU:** `scripts/check_al_setup.sh` (kiểm dữ liệu, md5, torch/CUDA, chạy test có torch, dựng thử 1 gói),
   `docs/al/RUNBOOK.md` (lệnh từng bước).
 - `scripts/run_al.sh`: thêm `dot2`, tự tạo gói vòng 2, chế độ `test ... --confirm-test`.
+
+## 02/11/2026 (đêm) — gom dữ liệu vào một thư mục `autocheckout-data`
+
+- Kiểm tra: `full_syn_rpc_synth_v2_v1_20261025.tar` (người dùng tải lại) = `data/` đã giải nén (cùng 101.681 file, mẫu 400
+  file khớp SHA256 biên nhận); `relearn_fix_v2/eval` = `rpc_eval_official_v1`; ảnh `relearn_fix_v2/images/{v2,real}`
+  trùng từng byte với `synth_v2/images` và `rpc/val2019`; model r1 hai nơi cùng md5.
+- Dựng `Finalprpject/autocheckout-data/` (30 GB, 118.889 file) bằng hard link, không tốn thêm ổ: rpc/, eval/, synth_v2/,
+  pretrained/, models/full-syn-r1/ (bỏ log/cache), relearn/ (bỏ phần trùng). `SHA256SUMS` toàn thư mục + `relearn/SHA256SUMS`.
+- Code: `autocheckout/datapaths.py` (một chỗ khai báo đường dẫn; `AC_DATA` để đổi chỗ); `update_model.with_data_root`
+  hiểu cấu trúc mới (và cấu trúc cũ relearn_fix_v1); tools `al_*` nhận `--data` thay cho `--release`; `run_naive` lấy
+  đường dẫn từ datapaths; `run_al.sh`, `run_relearn_fix.sh`, `check_al_setup.sh` (thêm `FULL=1` kiểm SHA256) theo
+  cấu trúc mới; bỏ `pack_al_data.sh` (thay bằng tar cả `autocheckout-data`).
+- Kiểm: chọn lại ảnh trên cấu trúc mới ra đúng các tập cũ; r1 0,4232 (calib) / 0,4308 (Val-B); `--stage data` dựng
+  được `al_margin_k_B500` với mọi đường dẫn trỏ vào `autocheckout-data`.
+- Không còn dùng: `gpu_upload/`, `packages_al/` (hard link / gói cũ — xoá được).

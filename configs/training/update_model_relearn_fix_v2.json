@@ -3,7 +3,7 @@
   "round": 1,
   "artifact_root": "data/training/update-model",
   "dry_run": false,
-  "data_root": "../relearn_fix_v2",
+  "data_root": "../autocheckout-data",
   "seed_task5_md5": "fe510a4c4dc2c81a328299c4009d31ff",
   "relearn_release": null,
   "relearn_task_config": "configs/relearn/task_config_relearn.json",

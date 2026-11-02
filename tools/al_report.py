@@ -1,9 +1,9 @@
 """A7: one table and one curve of the active-learning runs. Per run: cAcc-M2 on Val-B with Val-A-calib thresholds
 (tools/al_score.py, the main number), the improve-mode numbers of ``stages/<run>.json`` (Val-B-calibrated cAcc,
 AP50 of the SKUs not retrained, confusions inside the 17 rows, gate) and the labelling cost from the manifest.
-Writes ``<release>/active/report/{al_results.md, al_results.json, al_curve.png}``.
+Writes ``<data>/relearn/active/report/{al_results.md, al_results.json, al_curve.png}``.
 
-    python -m tools.al_report --release ../relearn_fix_v2 --campaign data/training/update-model/relearn-fix-v2
+    python -m tools.al_report
 """
 
 from __future__ import annotations
@@ -13,7 +13,10 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
+from autocheckout.datapaths import REPO, Layout
 from autocheckout.io import load_json, save_json
+
+DEFAULT_CAMPAIGN = REPO / 'data/training/update-model/relearn-fix-v2'
 
 
 def collect(release: Path, campaign: Path) -> list[dict]:
@@ -92,13 +95,15 @@ def curve(rows: list[dict], base: float | None, path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> list[dict]:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--release', type=Path, required=True)
-    ap.add_argument('--campaign', type=Path, required=True)
+    ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
+    ap.add_argument('--campaign', type=Path, default=DEFAULT_CAMPAIGN,
+                    help='campaign folder of update_model (default: data/training/update-model/relearn-fix-v2)')
     ap.add_argument('--baseline', default='baseline_r1', help='scored name of the model before relearning')
     args = ap.parse_args(argv)
-    rows = collect(args.release, args.campaign)
+    release = Layout.at(args.data).relearn
+    rows = collect(release, args.campaign)
     base = next((r['cAcc_calib'] for r in rows if r['name'] == args.baseline), None)
-    out = args.release / 'active/report'
+    out = release / 'active/report'
     out.mkdir(parents=True, exist_ok=True)
     (out / 'al_results.md').write_text(table(rows, base) + '\n', encoding='utf-8')
     save_json(out / 'al_results.json', rows, indent=1)

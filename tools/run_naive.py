@@ -3,6 +3,8 @@ r1, then its forgetting next to r1's (tools/forgetting_report.py, val). Needs a 
 
     python -m tools.run_naive --settings configs/training/full_syn_naive.json --last 5    # ~20 h on a 4090
     python -m tools.run_naive --settings configs/training/full_syn_naive.json --last 3    # cheaper, ~10 h
+
+The data paths come from the data folder (autocheckout/datapaths.py: ../autocheckout-data or $AC_DATA).
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import json
 from pathlib import Path
 
 from autocheckout import full_syn
+from autocheckout.datapaths import Layout
 from autocheckout.io import load_json
 from tools import forgetting_report
 
@@ -21,10 +24,14 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument('--settings', required=True)
     ap.add_argument('--last', type=int, default=full_syn.N_TASKS, choices=range(2, full_syn.N_TASKS + 1))
     ap.add_argument('--out', type=Path, default=Path('docs/al/ket-qua'))
+    ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
     args = ap.parse_args(argv)
     from autocheckout.training_workflow import resolve
 
-    settings = load_json(resolve(args.settings))
+    data = Layout.at(args.data)
+    settings = {k: v for k, v in load_json(resolve(args.settings)).items() if not k.startswith('_')}
+    settings.update(release_root=str(data.synth), eval_root=str(data.eval), raw_root=str(data.rpc),
+                    pretrained_root=str(data.pretrained), seed_campaign=str(data.r1))
     if settings.get('pdp_experiment') != full_syn.NAIVE:
         raise ValueError(f'the settings must run {full_syn.NAIVE}')
     plan = full_syn.prepare(settings)

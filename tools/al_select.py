@@ -1,8 +1,8 @@
-"""A1-A3 on a self-contained release (relearn_fix_v2): Val-A split, uncertainty of the round-1 model on the pool,
+"""A1-A3 on the data folder (autocheckout/datapaths.py): Val-A split, uncertainty of the round-1 model on the pool,
 one selection file per (strategy, budget, seed), plus the references ``oracle`` (real images of the base variant,
-chosen with the labels) and ``all`` (the whole pool). Writes ``<release>/active/``.
+chosen with the labels) and ``all`` (the whole pool). Writes ``<data>/relearn/active/``.
 
-    python -m tools.al_select --release ../relearn_fix_v2 --budgets 250 500 850 --seeds 0 1 2
+    python -m tools.al_select --budgets 250 500 850 --seeds 0 1 2
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ import numpy as np
 from autocheckout.active import select as sel
 from autocheckout.active.splits import split_pool_calib
 from autocheckout.active.uncertainty import image_scores
+from autocheckout.datapaths import Layout
 from autocheckout.io import load_json, md5_file, save_json
 from autocheckout.predictions import load_predictions
 
-PRED = 'seed/full-syn-r1/runs/EXP-FULL-SYN/task_5/pred_val.npz'
 
 
 def _md5_ids(ids) -> str:
@@ -30,7 +30,7 @@ def _md5_ids(ids) -> str:
 
 def main(argv: list[str] | None = None) -> dict:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--release', type=Path, required=True)
+    ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
     ap.add_argument('--base', default='pilot', help='variant whose real images are the oracle reference')
     ap.add_argument('--calib-frac', type=float, default=0.2)
     ap.add_argument('--split-seed', type=int, default=0)
@@ -39,14 +39,16 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument('--strategies', nargs='+', default=list(sel.STRATEGIES))
     ap.add_argument('--alpha', type=float, default=1.5)
     args = ap.parse_args(argv)
-    rel, out = args.release, args.release / 'active'
+    data = Layout.at(args.data)
+    rel, out = data.relearn, data.relearn / 'active'
+    pred = data.r1_task5_pred
 
     val_a, val_b = load_json(rel / 'meta/val_a.json'), load_json(rel / 'meta/val_b.json')
     ids_a, ids_b = {i['id'] for i in val_a['images']}, {i['id'] for i in val_b['images']}
     if ids_a & ids_b:
         raise ValueError('Val-A and Val-B share images')
-    preds = load_predictions(rel / PRED)
-    if preds.meta.get('ann_md5') != md5_file(rel / 'eval/val_full.json'):
+    preds = load_predictions(pred)
+    if preds.meta.get('ann_md5') != md5_file(data.eval / 'val_full.json'):
         raise ValueError('predictions were not made on eval/val_full.json')
     if not ids_a <= set(np.unique(preds.image_id).tolist()):
         raise ValueError('predictions miss Val-A images')
@@ -57,7 +59,8 @@ def main(argv: list[str] | None = None) -> dict:
     save_json(out / 'splits/val_a_split.json', split)
 
     scores = image_scores(preds, pool)  # predictions only: no label is read for the pool
-    save_json(out / 'scores/r1_pool.json', {'pred': PRED, 'pred_md5': md5_file(rel / PRED), 'images': scores})
+    save_json(out / 'scores/r1_pool.json', {'pred': str(pred.relative_to(data.root)), 'pred_md5': md5_file(pred),
+                                            'images': scores})
 
     common = {'pool_md5': _md5_ids(pool), 'scores_md5': md5_file(out / 'scores/r1_pool.json'),
               'created_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')}
