@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Học lại (mode improve) với thư mục dữ liệu tự đủ relearn_fix_v1 (build_relearn_data.py --self-contained).
+# Học lại (mode improve) với thư mục dữ liệu tự đủ (build_relearn_data.py --self-contained).
+# Mặc định relearn_fix_v2 (ảnh đủ mặt + ảnh thật + v2 + replay). Bản v1 (không ảnh đủ mặt):
+#   RELEARN_DATA_ROOT=../relearn_fix_v1 SETTINGS=configs/training/update_model_relearn_fix_v1.json bash scripts/run_relearn_fix.sh
 #
 #   bash scripts/run_relearn_fix.sh                 # mặc định: split -> baseline -> pilot
 #   bash scripts/run_relearn_fix.sh data            # chỉ dựng dữ liệu pilot, in số (không train)
 #   bash scripts/run_relearn_fix.sh e1              # sau khi pilot qua cổng (go)
 #   bash scripts/run_relearn_fix.sh final_test --confirm-test   # chấm test2019 một lần, khi nhóm đã chốt
 #
-# Thư mục dữ liệu mặc định ở cạnh repo (../relearn_fix_v1); đặt nơi khác thì RELEARN_DATA_ROOT=/duong/dan.
+# Thư mục dữ liệu mặc định ở cạnh repo (../relearn_fix_v2); đặt nơi khác thì RELEARN_DATA_ROOT=/duong/dan.
 # Bị ngắt thì chạy lại đúng lệnh: bước đã xong được bỏ qua, task dở chạy tiếp từ last.ckpt.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-DATA=$(cd "${RELEARN_DATA_ROOT:-$REPO/../relearn_fix_v1}" && pwd)
-SETTINGS=${SETTINGS:-$REPO/configs/training/update_model_relearn_fix_v1.json}
+DATA=$(cd "${RELEARN_DATA_ROOT:-$REPO/../relearn_fix_v2}" && pwd)
+SETTINGS=${SETTINGS:-$REPO/configs/training/update_model_relearn_fix_v2.json}
 STAGE=${1:-pilot}
 shift || true
 
