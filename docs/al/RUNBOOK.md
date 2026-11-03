@@ -5,9 +5,10 @@ nguồn gốc trong `autocheckout-data/README.md`, đường dẫn trong code �
 Thuê máy / SSH / Kaggle: như tài liệu dự án `claude/runbook-vast-github-kaggle-2026-11-02.md`.
 
 ```
-~/                         (/root trên Vast)
+/workspace/                (thư mục làm việc trên Vast)
 ├── AutoCheckout-CL/       git clone, nhánh feat/active-learning; kết quả ghi vào AutoCheckout-CL/data/training/
-└── autocheckout-data/     rpc/ eval/ synth_v2/ pretrained/ models/full-syn-r1/ relearn/
+├── autocheckout-data/     rpc/ eval/ synth_v2/ pretrained/ models/full-syn-r1/ relearn/
+└── venv-pdp/              Python 3.10
 ```
 
 ## 1. Trước buổi GPU (Mac, một lần)
@@ -17,16 +18,28 @@ cd ~/Desktop/Finalprpject && tar -cf autocheckout-data.tar autocheckout-data && 
 ```
 Upload `autocheckout-data.tar` (một file, ~30 GB) lên dataset Kaggle Private. Kaggle giữ nguyên file `.tar`.
 
-## 2. Trên máy GPU (ổ ≥ 100 GB)
+## 2. Trên máy GPU (template PyTorch của Vast, SSH, ổ ≥ 150 GB; làm việc trong `/workspace`)
+Hướng dẫn từng bước kèm cách kiểm tra và xử lý lỗi: `Finalprpject/HUONG-DAN-CHAY-GPU.md`. Tóm tắt:
 ```bash
-cd ~
-git clone git@github.com:<user>/AutoCheckout-CL.git
-cd AutoCheckout-CL && git checkout feat/active-learning && pip install -r requirements.txt && cd ~
-kaggle datasets download -d <user>/<dataset> -p ~/dl --unzip
-tar -xf ~/dl/autocheckout-data.tar -C ~/ && rm -rf ~/dl     # -> ~/autocheckout-data
-cd ~/AutoCheckout-CL && FULL=1 bash scripts/check_al_setup.sh   # phải in SẴN SÀNG (FULL=1: kiểm SHA256, lần đầu)
 tmux new -s al
+cd /workspace
+git clone git@github.com:GraduationProjec1/Model.git AutoCheckout-CL
+cd AutoCheckout-CL && git checkout feat/active-learning
+pip install -U uv
+uv venv --seed -p 3.10 /workspace/venv-pdp
+source /workspace/venv-pdp/bin/activate
+uv pip install --index-strategy unsafe-best-match -r configs/environment/requirements-lock-cu121.txt
+uv pip install --no-deps -e .
+export CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST=8.9
+mkdir -p ~/.kaggle && echo 'TOKEN' > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+uvx --python 3.12 --with six kaggle datasets download -d hinvminh12/full-active-learing-relearn -p /workspace/dl --unzip
+md5sum /workspace/dl/autocheckout-data.tar
+tar --warning=no-unknown-keyword -xf /workspace/dl/autocheckout-data.tar -C /workspace/ && rm -rf /workspace/dl
+FULL=1 bash scripts/check_al_setup.sh
 ```
+Lưu ý: clone bằng SSH (https đòi username); máy mặc định Python 3.12 nên cần venv 3.10; `kaggle` chạy qua `uvx` (bản trong venv quá cũ);
+md5 gói dữ liệu `5a1efb48209d998012b01dd1dfa9674c`; `check_al_setup.sh` phải in `SẴN SÀNG`. Mỗi shell mới: `source /workspace/venv-pdp/bin/activate`
+và `export CUDA_HOME=... TORCH_CUDA_ARCH_LIST=8.9` (card RTX 3000: 8.6).
 
 ## 3. Active learning
 | Bước | Lệnh | Thời gian (4090, ước tính) |
@@ -48,11 +61,10 @@ python -m tools.run_naive --settings configs/training/full_syn_naive.json --last
 ```
 Ghi `docs/al/ket-qua/forgetting.md`: bảng AP50 từng nhóm của r1 và NAIVE cạnh nhau, độ quên, BWT.
 
-## 5. Mang kết quả về Mac
+## 5. Mang kết quả về Mac (alias do `vast.sh` tạo mặc định là `vast2`)
 ```bash
-rsync -avP vast:~/autocheckout-data/relearn/active/ ~/Desktop/Finalprpject/autocheckout-data/relearn/active/
-rsync -avP --exclude '*.pth' vast:~/AutoCheckout-CL/data/training/ ~/Desktop/Finalprpject/ket-qua-gpu/
-rsync -avP vast:~/AutoCheckout-CL/docs/al/ket-qua/ ~/Desktop/Finalprpject/AutoCheckout-CL/docs/al/ket-qua/
-# checkpoint cần giữ (vd. run AL tốt nhất): rsync thêm runs/EXP-FB-FT-<run>/task_5/task_final.pth
+rsync -avP vast2:/workspace/autocheckout-data/relearn/active/ ~/Desktop/Finalprpject/autocheckout-data/relearn/active/
+rsync -avP --exclude '*.pth' vast2:/workspace/AutoCheckout-CL/data/training/ ~/Desktop/Finalprpject/ket-qua-gpu/
+rsync -avP vast2:/workspace/AutoCheckout-CL/docs/al/ket-qua/ ~/Desktop/Finalprpject/AutoCheckout-CL/docs/al/ket-qua/
 ```
-Nếu sửa code trên máy GPU: `git commit && git push` trước khi destroy máy.
+Nếu sửa code trên máy GPU: `git commit && git push` trước khi Destroy máy.
