@@ -54,6 +54,7 @@ echo "=========================================================="
 # ----------------- HÀM DỌN DẸP, SYNC DRIVE VÀ DESTROY INSTANCE -----------------
 finish_and_cleanup() {
     local EXIT_CODE=$?
+    if [[ -n "${SYNC_PID:-}" ]]; then pkill -P "$SYNC_PID" 2>/dev/null || true; kill "$SYNC_PID" 2>/dev/null || true; fi
     echo ""
     echo "=========================================================="
     echo " QUÁ TRÌNH HUẤN LUYỆN KẾT THÚC VỚI MÃ: $EXIT_CODE"
@@ -63,6 +64,14 @@ finish_and_cleanup() {
     # 1. Lưu lại metadata kết thúc
     echo "End Time: $(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_DIR/run_metadata.txt"
     echo "Exit Code: $EXIT_CODE" >> "$LOG_DIR/run_metadata.txt"
+
+    # 1b. Bản dự phòng báo cáo AL (đi cùng update-model) + md5 mọi weights để kiểm tra sau khi tải về
+    if [[ -d "$DATA_DIR/relearn/active" ]]; then
+        mkdir -p "$REPO_DIR/data/training/update-model/relearn_active_backup"
+        cp -r "$DATA_DIR/relearn/active/." "$REPO_DIR/data/training/update-model/relearn_active_backup/" || true
+    fi
+    (cd "$REPO_DIR/data/training/update-model" 2>/dev/null && find . -name "*.pth" -exec md5sum {} \; | sort -k2) \
+        > "$LOG_DIR/weights_md5.txt" 2>/dev/null || true
 
     # 2. Đồng bộ kết quả qua rclone
     if command -v rclone &>/dev/null; then
@@ -159,6 +168,36 @@ trap finish_and_cleanup EXIT
     echo "=== PIP FREEZE ==="
     pip list || true
 } > "$LOG_DIR/run_metadata.txt"
+
+# ----------------- BƯỚC 1b: ẢNH CHỤP CẤU HÌNH + ĐỒNG BỘ ĐỊNH KỲ -----------------
+mkdir -p "$LOG_DIR/config_snapshot"
+cp -r configs/training configs/relearn "$LOG_DIR/config_snapshot/" 2>/dev/null || true
+git status --porcelain > "$LOG_DIR/config_snapshot/git_status.txt" 2>&1 || true
+git diff > "$LOG_DIR/config_snapshot/git_diff.patch" 2>&1 || true
+{
+    echo "TASK=$TASK"; echo "AC_DATA=$AC_DATA"; echo "CUDA_HOME=${CUDA_HOME:-}"
+    echo "TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST:-}"; echo "RCLONE_REMOTE=$RCLONE_REMOTE"
+    echo "AUTO_DESTROY=$AUTO_DESTROY AUTO_STOP=$AUTO_STOP"
+    [[ -f "$DATA_DIR/README.md" ]] && echo "DATA_README_MD5=$(md5sum "$DATA_DIR/README.md" | cut -d' ' -f1)"
+} > "$LOG_DIR/config_snapshot/env.txt"
+
+# Đồng bộ lên Drive mỗi SYNC_EVERY_MIN phút (mặc định 30; 0 = tắt): máy chết giữa chừng vẫn còn các run đã xong.
+SYNC_EVERY_MIN="${SYNC_EVERY_MIN:-30}"
+if command -v rclone &>/dev/null && [[ "$SYNC_EVERY_MIN" -gt 0 ]]; then
+    (
+        while sleep $((SYNC_EVERY_MIN * 60)); do
+            rclone copy "$REPO_DIR/data/training/update-model" "$RCLONE_REMOTE/$RUN_ID/update-model" \
+                --exclude "vast_logs_*" --exclude "**/cache/**" --exclude "**/last.ckpt" -q || true
+            if [[ -d "$DATA_DIR/relearn/active" ]]; then
+                rclone copy "$DATA_DIR/relearn/active" "$RCLONE_REMOTE/$RUN_ID/relearn_active" -q || true
+            fi
+            rclone copy "$LOG_DIR" "$RCLONE_REMOTE/$RUN_ID/logs" -q || true
+            echo "[SYNC] $(date '+%F %T') đã đồng bộ giữa chừng" >> "$LOG_DIR/sync.log"
+        done
+    ) &
+    SYNC_PID=$!
+    echo "Đồng bộ định kỳ mỗi $SYNC_EVERY_MIN phút (PID $SYNC_PID)" | tee -a "$MAIN_LOG"
+fi
 
 # ----------------- BƯỚC 2: CHẠY HUẤN LUYỆN THEO TASK -----------------
 echo "Bắt đầu chạy task: $TASK..." | tee -a "$MAIN_LOG"
