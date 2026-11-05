@@ -30,6 +30,7 @@ INSTANCE_ID="${INSTANCE_ID:-}"
 # Task muốn chạy:
 #   - "al_dot1": Active Learning đợt 1 (7 run B=500: random x3, margin, margin_k, margin_bal, oracle)
 #   - "al_dot2": Active Learning đợt 2 (B=250, 850 + entropy)
+#   - "al_next": vòng 2 từ margin_k (+ random_s0 so sánh) rồi đợt 2; cần khôi phục campaign dot1 từ Drive trước
 #   - "relearn_pilot": Chạy học lại pilot (17 SKU)
 #   - "relearn_e1": Chạy học lại E1 (63 SKU)
 #   - "naive": Chạy fine-tune thẳng (baseline B2)
@@ -73,6 +74,17 @@ finish_and_cleanup() {
             # Sync toàn bộ logs, configs, checkpoints, npz và json
             rclone copy "$REPO_DIR/data/training/update-model" "$RCLONE_REMOTE/$RUN_ID/update-model" \
                 --exclude "vast_logs_*" --verbose || true
+        fi
+
+        # Chốt an toàn: đếm .pth trên máy và trên Drive; thiếu thì KHÔNG destroy (chỉ stop) để còn lấy lại.
+        local N_LOCAL N_REMOTE
+        N_LOCAL=$(find "$REPO_DIR/data/training/update-model" -name "*.pth" 2>/dev/null | wc -l)
+        N_REMOTE=$(rclone ls "$RCLONE_REMOTE/$RUN_ID/update-model" --include "*.pth" 2>/dev/null | wc -l)
+        echo "[KIỂM TRA] Weights .pth: trên máy $N_LOCAL, trên Drive $N_REMOTE" | tee -a "$LOG_DIR/run_metadata.txt"
+        if [[ "$N_REMOTE" -lt "$N_LOCAL" ]]; then
+            echo "[CẢNH BÁO] Drive thiếu weights -> KHÔNG destroy, chỉ STOP máy. Vào lại máy để upload tay." | tee -a "$LOG_DIR/run_metadata.txt"
+            rclone copy "$LOG_DIR" "$RCLONE_REMOTE/$RUN_ID/logs" || true
+            AUTO_DESTROY=0; AUTO_STOP=1
         fi
 
         echo "[RCLONE] Đang upload báo cáo active learning..."
@@ -155,6 +167,18 @@ case "$TASK" in
     al_dot1)
         echo ">> Chạy Active Learning đợt 1 (7 run B=500)..." | tee -a "$MAIN_LOG"
         bash scripts/run_al.sh dot1 2>&1 | tee -a "$MAIN_LOG"
+        ;;
+    al_next)
+        # Vòng 2 từ model tốt nhất (margin_k) + random so sánh, rồi đợt 2 (B=250, 850). Cần khôi phục campaign dot1 trước.
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        for v in al_margin_k_B500 al_random_B500_s0; do
+            for f in "runs/EXP-FB-FT-$v/task_5/task_final.pth" "runs/EXP-FB-FT-$v/task_5/pred_val.npz" "stages/$v.json" "scored/$v/calibration_count_m2.json"; do
+                [[ -f "$CAMP/$f" ]] || { echo "[THIẾU] $CAMP/$f -> khôi phục campaign từ Drive trước (bước B5)" | tee -a "$MAIN_LOG"; exit 3; }
+            done
+        done
+        [[ -f "$CAMP/stages/baseline.json" && -f "$CAMP/plan.json" ]] || { echo "[THIẾU] stages/baseline.json hoặc plan.json" | tee -a "$MAIN_LOG"; exit 3; }
+        echo ">> Vòng 2 (margin_k_r2, random_s0_r2) rồi đợt 2 (dot2)..." | tee -a "$MAIN_LOG"
+        bash scripts/run_al.sh al_margin_k_B500_r2 al_random_B500_s0_r2 dot2 2>&1 | tee -a "$MAIN_LOG"
         ;;
     al_dot2)
         echo ">> Chạy Active Learning đợt 2 (B=250, 850 + entropy)..." | tee -a "$MAIN_LOG"

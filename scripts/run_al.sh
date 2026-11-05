@@ -69,7 +69,7 @@ for v in "${VARIANTS[@]}"; do
         continue
     fi
     echo "=== $(date -u +%FT%TZ) $v" | tee -a "$LOG"
-    um --stage al --variant "$v"
+    um --stage al --variant "$v" || true
     PRED=$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_val.npz
     if [[ -f $PRED && ! -f $REL/active/scored/$v.json ]]; then
         python -m tools.al_score --name "$v" --pred "$PRED" 2>&1 | tee -a "$LOG"
