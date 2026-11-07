@@ -5,6 +5,9 @@
 #   bash scripts/run_al.sh dot1                 # B=500: random x3, margin, margin_k, margin_bal + oracle (~7 run)
 #   bash scripts/run_al.sh dot2                 # B=250, 850 (random x3, margin, margin_k, margin_bal, entropy)
 #   bash scripts/run_al.sh al_margin_k_B500_r2  # vòng 2: tự tạo tập chọn + gói từ model vòng 1, rồi train
+#   bash scripts/run_al.sh al_margin_k_B500_r3_rows al_margin_k_B500_r3_train   # vòng 3 (docs/design/2026-11-07-vong-3):
+#       tag rows|train|real|all|prompt|freeze; gói dựng từ tập chọn margin_k_B500_r2 + base e1; freeze cần
+#       R3_FREEZE_DATA=<tag của run tốt nhất> (dữ liệu của run đó, chỉ đổi lr_old = 0)
 #   bash scripts/run_al.sh dot1 --dry-run       # chỉ dựng dữ liệu (CPU), không train
 #   bash scripts/run_al.sh test al_margin_k_B500 al_random_B500_s0 --confirm-test   # test2019, MỘT lần mỗi run
 #
@@ -56,9 +59,28 @@ if [[ $TEST == 1 ]]; then
     exit 0
 fi
 
+# Vòng 3: tùy chọn al_build_variant theo dữ liệu của tag (mục 11-B của plan). train/prompt dùng lại dữ liệu của
+# rows/real; mỗi run vẫn có gói riêng (update_model tìm variants/<tên run>).
+r3_build() {
+    local v=$1 tag=${1##*_r3_} sel=${1#al_}
+    sel=${sel%_r3_*}_r2
+    [[ $tag == freeze ]] && { tag=${R3_FREEZE_DATA:?"_r3_freeze: đặt R3_FREEZE_DATA=rows|train|real|all|prompt"}; }
+    [[ -f $REL/active/selections/$sel.json ]] || { echo "$v: thiếu tập chọn $sel (chạy vòng 2 trước)" >&2; return 1; }
+    local opts
+    case $tag in
+        rows|train) opts=(--rows configs/relearn/rows_r3.json --repeat 3) ;;
+        real|prompt) opts=(--rows configs/relearn/rows_r3.json --repeat 7 --v2-keep 0.5) ;;
+        all) opts=(--rows configs/relearn/rows_all.json --repeat 7 --v2-keep 0.5) ;;
+        *) echo "$v: tag vòng 3 lạ: $tag" >&2; return 1 ;;
+    esac
+    python -m tools.al_build_variant --selection "$sel" --base e1 "${opts[@]}" --name "$v" 2>&1 | tee -a "$LOG"
+}
+
 for v in "${VARIANTS[@]}"; do
     if [[ ! -f $REL/variants/$v/train_task_5_fix.json ]]; then
-        if [[ $v == *_r2 ]]; then
+        if [[ $v == *_r3_* ]]; then
+            r3_build "$v"
+        elif [[ $v == *_r2 ]]; then
             python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r2}" 2>&1 | tee -a "$LOG"
         else
             python -m tools.al_build_variant --selection "${v#al_}" 2>&1 | tee -a "$LOG"

@@ -89,6 +89,7 @@ class local_trainer(pl.LightningModule):
 		detr_config.task_num_classes = args.task_num_classes
 		detr_config.use_shared_pool = args.use_shared
 		detr_config.use_private_pool = args.use_private
+		detr_config.tune_old_private = bool(getattr(args, 'tune_old_private', 0))  # round 3, off by default
 
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 		self.seen_classes = seen_classes

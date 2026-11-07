@@ -54,6 +54,14 @@ VARIANTS = {
     'e2': dict(epochs=6, lr=2e-5, lr_old=5e-6, lr_drop=4),
     'round2': dict(epochs=2, lr=1e-5, lr_old=2.5e-6, lr_drop=100),
 }
+# Round 3 (docs/design/2026-11-07-vong-3, 6.5): al_<selection>_r3_<tag>, from the round-2 model. augment (I2) without
+# flips; tune_old_private: the private prompts of tasks 1-4 train too; lr_old 0 freezes every shared part.
+VARIANTS['r3_base'] = dict(VARIANTS['round2'])
+VARIANTS['r3_strong'] = dict(epochs=6, lr=2e-5, lr_old=5e-6, lr_drop=4, augment=1)
+VARIANTS['r3_prompt'] = {**VARIANTS['r3_strong'], 'tune_old_private': 1}
+VARIANTS['r3_freeze'] = {**VARIANTS['r3_strong'], 'lr_old': 0.0}
+R3_TAGS = {'rows': 'r3_base', 'train': 'r3_strong', 'real': 'r3_strong', 'all': 'r3_strong', 'prompt': 'r3_prompt',
+           'freeze': 'r3_freeze'}
 # Gates of the plan, written before any run. gain: least cAcc-M2 gain on Val-B (strict: must be > 0);
 # pair_drop: least relative fall of the confusions inside the retrained pairs; other_drop: largest AP50 fall of the
 # SKUs not retrained; max_falls: SKUs (>= 30 objects) whose share of right objects falls by more than 0.02.
@@ -63,6 +71,8 @@ GATES = {
     'e2': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.30, other_drop=0.01, max_falls=0),
     'round2': dict(gain=0.0, strict=False, sign_p=None, pair_drop=0.0, other_drop=0.005, max_falls=0),
 }
+# Round 3: the pilot gate is only reported; the decision follows the criteria of the design (11-C, 11-D).
+GATES.update({kind: dict(GATES['pilot']) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze')})
 # Quota of the synthetic images (settings, objects per retrained SKU): from the full-face relearn release, from v2
 # for an SKU the relearn release covers, from v2 for an SKU it does not. Without these keys every synthetic image
 # holding a retrained SKU is taken (the first version: 29,539 v2 images for the pilot rows, 62,061 for e1).
@@ -84,6 +94,11 @@ def _kind(name: str) -> str:
     """Hyperparameters and gate of a run: an active-learning variant (``al_<selection>``, built by
     tools/al_build_variant.py) is trained and gated as the pilot, so only its real images differ; its second round
     (``al_<selection>_r2``, tools/al_round2.py) as round2, from the first round's model."""
+    if name.startswith('al_') and '_r3_' in name:
+        tag = name.rsplit('_r3_', 1)[1]
+        if tag not in R3_TAGS:
+            raise ValueError(f'{name}: round-3 tag must be one of {sorted(R3_TAGS)}')
+        return R3_TAGS[tag]
     if name.startswith('al_'):
         return 'round2' if name.endswith('_r2') else 'pilot'
     return name
@@ -91,6 +106,11 @@ def _kind(name: str) -> str:
 
 def _al_start(plan: dict, name: str) -> tuple[str, str]:
     """(model to start from, run to compare with) of an active-learning variant."""
+    if '_r3_' in name:  # round 3: from the round-2 model of the same selection
+        second = name.rsplit('_r3_', 1)[0] + '_r2'
+        if _done(plan, second) is None:
+            raise RuntimeError(f'{name} starts from {second}: train {second} first')
+        return str(Path(plan['runs']) / f'{EXP}-{second}' / f'task_{STAGE}/task_final.pth'), second
     if not name.endswith('_r2'):
         return plan['seed_task5'], 'baseline'
     first = name.removesuffix('_r2')
@@ -373,7 +393,8 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
     environment = _environment(view, experiment, runs, START_TASK=STAGE, N_TASKS=STAGE, EPOCHS=hp['epochs'],
                                PRED_SPLITS=splits, STOP_AFTER_STEPS=0, FSA_HF=fsa_hf, PREV_CKPT=prev,
                                TRAIN_ROWS=task_dir / 'train_rows.json', LR=hp['lr'], LR_OLD=hp['lr_old'],
-                               LR_DROP=hp['lr_drop'])
+                               LR_DROP=hp['lr_drop'], AUGMENT=hp.get('augment', 0),
+                               TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0))
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']
@@ -443,6 +464,20 @@ def stage_baseline(plan: dict) -> dict:
     return _finish(plan, 'baseline', report, None)
 
 
+def _fit(plan: dict, run: Path, data: dict) -> dict:
+    """Round 3 (docs/design/2026-11-07-vong-3, §6.7): cAcc of the Val-A images an AL run trained on and of the pool
+    images it did not (tools/fit_check.py, Val-A-calib thresholds); nothing for a run without an AL selection."""
+    if not data.get('selection') or not data.get('prebuilt_release'):
+        return {}
+    from tools.fit_check import fit_scores
+
+    active = Path(data['prebuilt_release']) / 'active'
+    return fit_scores(load_json(Path(plan['eval_root']) / 'val_full.json'), _cfg(plan),
+                      load_predictions(run / f'task_{STAGE}/pred_val.npz'),
+                      load_json(active / 'splits/val_a_split.json'),
+                      load_json(active / 'selections' / f"{data['selection']}.json")['image_ids'])
+
+
 def _run_variant(plan: dict, name: str, rows: list[int], feedback: list[int], prev: str, reference: str) -> dict:
     """Data, training, Val-B scores and gate of one improve run, against the scored run ``reference``."""
     with _attempt(plan, name) as (record, attempt):
@@ -468,7 +503,7 @@ def _run_variant(plan: dict, name: str, rows: list[int], feedback: list[int], pr
     gate = _gate(plan, f'improve {name}', decision, reason, **GATES[_kind(name)])
     report = {'stage': name, 'reference': reference, 'rows': rows, 'data': data,
               'hyperparameters': VARIANTS[_kind(name)],
-              **score, 'AP50_other': {'base': ap_base, 'new': ap_new},
+              **score, **_fit(plan, run, data), 'AP50_other': {'base': ap_base, 'new': ap_new},
               'comparison': {k: v for k, v in comparison.items() if k != 'per_sku'}}
     return _finish(plan, name, report, gate)
 

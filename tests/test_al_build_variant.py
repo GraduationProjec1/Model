@@ -125,3 +125,37 @@ def test_update_model_al_recipes_and_start(tmp_path):
     _w(tmp_path / 'stages/al_x.json', {'cAcc_m2': 0.5})
     prev, reference = um._al_start(plan, 'al_x_r2')
     assert reference == 'al_x' and prev.endswith('runs/EXP-FB-FT-al_x/task_5/task_final.pth')
+
+
+def test_round3_options_rows_repeat_name(release, tmp_path):
+    # vòng 3 (docs/design/2026-11-07-vong-3, Task 4): rows từ file, số lần lặp ảnh thật, tên gói riêng
+    rows = tmp_path / 'rows.json'
+    rows.write_text(json.dumps([0, 1, 2, 3]))
+    m = bv.build(release, 's1', rows=rows, repeat=5, name='al_s1_r3_rows')
+    out = release / 'relearn/variants/al_s1_r3_rows'
+    assert load_json(out / 'train_rows.json') == [0, 1, 2, 3] and m['rows'] == [0, 1, 2, 3]
+    assert m['images_per_source']['real'] == 10 and m['params']['feedback_repeat'] == 5
+    assert not (release / 'relearn/variants/al_s1').exists()  # tên mặc định không bị ghi
+
+
+def test_round3_v2_keep_is_seeded_and_guards_rare_classes(release):
+    rel = release / 'relearn/variants/pilot'
+    base = load_json(rel / 'train_task_5_fix.json')
+    extra = [{'id': 10 + k, 'file_name': f'v2/task_1/{k}.jpg', 'width': 10, 'height': 10, 'orig_id': 100 + k,
+              'source': 'v2'} for k in range(8)]
+    base['images'] += extra
+    base['annotations'] += [{'id': 10 + k, 'image_id': 10 + k, 'category_id': 2, 'bbox': [0, 0, 5, 5], 'area': 25,
+                             'iscrowd': 0} for k in range(8)]
+    _w(rel / 'train_task_5_fix.json', base)
+    a = bv.build(release, 's1', v2_keep=0.5, min_per_class=1, name='k1')
+    b = bv.build(release, 's1', v2_keep=0.5, min_per_class=1, name='k2')
+    assert a['images_per_source']['v2'] == b['images_per_source']['v2'] < 9
+    assert a['fixed_part_md5'] == b['fixed_part_md5']
+    with pytest.raises(ValueError):  # gần hết ảnh v2 bị bỏ: lớp 2 trong phần cố định tụt dưới min_per_class
+        bv.build(release, 's1', v2_keep=0.01, min_per_class=1, name='k3')
+
+
+def test_default_build_unchanged(release):
+    m = bv.build(release, 's1')
+    assert 'v2_keep' not in m or m['v2_keep'] is None
+    assert m['images_per_source'] == {'real': 6, 'v2': 1, 'relearn': 1}

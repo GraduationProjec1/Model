@@ -109,3 +109,82 @@ def test_improve_dry_run_runs_every_stage_once(tmp_path):
         final = um.stage_final_test(plan, confirm=True)
         assert final['test2019']['counting']
     assert um.prepare(settings) == plan
+
+
+# --- vòng 3 (docs/design/2026-11-07-vong-3, Task 5) ---------------------------------------------------------------
+@pytest.mark.parametrize('name, kind', [
+    ('al_margin_k_B500', 'pilot'), ('al_margin_k_B500_r2', 'round2'),
+    ('al_margin_k_B500_r3_rows', 'r3_base'), ('al_margin_k_B500_r3_train', 'r3_strong'),
+    ('al_margin_k_B500_r3_real', 'r3_strong'), ('al_margin_k_B500_r3_all', 'r3_strong'),
+    ('al_margin_k_B500_r3_prompt', 'r3_prompt'), ('al_margin_k_B500_r3_freeze', 'r3_freeze'),
+])
+def test_round3_kind_and_recipes(name, kind):
+    assert um._kind(name) == kind and kind in um.VARIANTS and kind in um.GATES
+
+
+def test_round3_recipes():
+    assert um.VARIANTS['r3_base'] == um.VARIANTS['round2']
+    strong = um.VARIANTS['r3_strong']
+    assert (strong['epochs'], strong['lr'], strong['lr_old'], strong['augment']) == (6, 2e-5, 5e-6, 1)
+    assert um.VARIANTS['r3_prompt'] == {**strong, 'tune_old_private': 1}
+    assert um.VARIANTS['r3_freeze'] == {**strong, 'lr_old': 0.0}
+    for old in ('pilot', 'e1', 'e2', 'round2'):  # công thức cũ không có cờ mới: chạy lại ra đúng như cũ
+        assert 'augment' not in um.VARIANTS[old] and 'tune_old_private' not in um.VARIANTS[old]
+
+
+def test_round3_unknown_tag_is_refused():
+    with pytest.raises(ValueError):
+        um._kind('al_margin_k_B500_r3_kd')
+
+
+def test_round3_starts_from_round2(tmp_path):
+    runs = tmp_path / 'runs'
+    (tmp_path / 'stages').mkdir()
+    (tmp_path / 'stages' / 'al_margin_k_B500_r2.json').write_text(json.dumps({'stage': 'al_margin_k_B500_r2'}))
+    plan = {'root': str(tmp_path), 'runs': str(runs), 'seed_task5': '/r1.pth'}
+    prev, ref = um._al_start(plan, 'al_margin_k_B500_r3_train')
+    assert prev == str(runs / 'EXP-FB-FT-al_margin_k_B500_r2' / 'task_5/task_final.pth')
+    assert ref == 'al_margin_k_B500_r2'
+    with pytest.raises(RuntimeError):
+        um._al_start(plan, 'al_margin_b500_r3_rows')
+
+
+def test_exp_fb_ft_round3_flags(tmp_path):
+    import subprocess
+
+    base = dict(REPO=str(REPO), FSA_HF='/fsa', SYNTH_ROOT='/synth', PREV_CKPT='/r2.pth', TRAIN_ROWS='/rows.json',
+                PATH='/usr/bin:/bin')
+    script = f'source {REPO}/configs/exp/native/EXP-FB-FT.sh; printf "%s\\0" "${{ARGS[@]}}"'
+
+    def last(env):
+        out = subprocess.run(['bash', '-ec', script], env=env, capture_output=True, text=True,
+                             check=True).stdout.split('\0')[:-1]
+        return {flag: out[i + 1] for i, flag in enumerate(out[:-1]) if flag.startswith('--')}
+
+    old = last(base)
+    assert old['--augment'] == '0' and old['--tune_old_private'] == '0'  # mặc định: như trước
+    new = last({**base, 'AUGMENT': '1', 'TUNE_OLD_PRIVATE': '1', 'LR_OLD': '0'})
+    assert (new['--augment'], new['--tune_old_private'], new['--lr_old']) == ('1', '1', '0')
+    assert new.get('--augment_flip', '0') == '0'  # không lật ảnh: chữ trên bao bì bị ngược
+
+
+# --- vòng 3 (docs/design/2026-11-07-vong-3, Task 7) ---------------------------------------------------------------
+def test_fit_only_for_runs_with_an_al_selection(tmp_path, monkeypatch):
+    import tools.fit_check as fc
+
+    assert um._fit({}, tmp_path, {'variant': 'pilot'}) == {}
+    seen = {}
+    monkeypatch.setattr(fc, 'fit_scores', lambda val, cfg, preds, split, ids: seen.update(split=split, ids=ids)
+                        or {'cAcc_trained': 0.5, 'cAcc_pool_untrained': 0.4})
+    monkeypatch.setattr(um, 'load_predictions', lambda path: path)
+    monkeypatch.setattr(um, '_cfg', lambda plan: None)
+    active = tmp_path / 'rel/active'
+    (active / 'splits').mkdir(parents=True)
+    (active / 'selections').mkdir()
+    (tmp_path / 'eval').mkdir()
+    (tmp_path / 'eval/val_full.json').write_text('{}')
+    (active / 'splits/val_a_split.json').write_text('{"calib": [1], "pool": [2, 3]}')
+    (active / 'selections/margin_k_B500_r2.json').write_text('{"image_ids": [2]}')
+    fit = um._fit({'eval_root': str(tmp_path / 'eval')}, tmp_path / 'run',
+                  {'selection': 'margin_k_B500_r2', 'prebuilt_release': str(tmp_path / 'rel')})
+    assert fit == {'cAcc_trained': 0.5, 'cAcc_pool_untrained': 0.4} and seen['ids'] == [2]

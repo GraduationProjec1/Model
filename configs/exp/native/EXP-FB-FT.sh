@@ -9,4 +9,5 @@ source "$REPO/configs/exp/native/EXP-FULL-SYN.sh"
 ARGS+=(--pseudo none --init_new_prompts 0 --new_params class_embed,prompts.private
     --lr "${LR:-2e-5}" --lr_old "${LR_OLD:-5e-6}" --lr_drop "${LR_DROP:-3}"
     --train_rows "${TRAIN_ROWS:?TRAIN_ROWS must point to the JSON list of labels to retrain}"
-    --train_suffix _fix)
+    --train_suffix _fix
+    --augment "${AUGMENT:-0}" --tune_old_private "${TUNE_OLD_PRIVATE:-0}")  # round 3 (design 2026-11-07-vong-3); off = as before

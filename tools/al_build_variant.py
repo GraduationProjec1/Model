@@ -39,14 +39,39 @@ def _link_or_copy(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
 
 
-def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_images: bool = True) -> dict:
+def _keep_v2(base_train: dict, fraction: float, min_per_class: int, seed: int = 0) -> set[int]:
+    """Round 3 (B4, --v2-keep): ids of the base images to keep: all non-v2 images, and ``fraction`` of the v2 images
+    drawn with a fixed seed. Refused when a class with >= ``min_per_class`` objects in the base fixed part falls
+    under it."""
+    import random
+    from collections import Counter
+
+    fixed = [i for i in base_train['images'] if i.get('source') != 'real']
+    v2 = sorted(i['id'] for i in fixed if i.get('source') == 'v2')
+    keep_v2 = set(random.Random(seed).sample(v2, round(len(v2) * fraction)))
+    keep = {i['id'] for i in fixed if i.get('source') != 'v2'} | keep_v2
+    fixed_ids = {i['id'] for i in fixed}
+    before = Counter(a['category_id'] for a in base_train['annotations'] if a['image_id'] in fixed_ids)
+    after = Counter(a['category_id'] for a in base_train['annotations'] if a['image_id'] in keep)
+    short = sorted(c for c, n in before.items() if n >= min_per_class and after[c] < min_per_class)
+    if short:
+        raise ValueError(f'--v2-keep {fraction}: classes under {min_per_class} objects: {short[:20]}')
+    return keep
+
+
+def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_images: bool = True, *,
+          rows: Path | None = None, repeat: int | None = None, v2_keep: float | None = None,
+          min_per_class: int = 100, name: str | None = None) -> dict:
+    """Round 3 options (docs/design/2026-11-07-vong-3, Task 4), all off by default (the A4 variant as before):
+    ``rows`` a JSON list written as train_rows.json instead of the base's; ``repeat`` the real images' repeat;
+    ``v2_keep`` the share of the base's v2 images kept (seeded, ``min_per_class`` guarded); ``name`` the variant."""
     data = Layout.at(data_root)
     release = data.relearn
     sel = load_json(release / f'active/selections/{selection}.json')
     split = load_json(release / 'active/splits/val_a_split.json')
     base_dir = release / 'variants' / base
     base_train, base_manifest = load_json(base_dir / 'train_task_5_fix.json'), load_json(base_dir / 'manifest.json')
-    repeat = int(base_manifest['params']['feedback_repeat'])
+    repeat = int(repeat or base_manifest['params']['feedback_repeat'])
     val_a, val_b = load_json(release / 'meta/val_a.json'), load_json(release / 'meta/val_b.json')
     test_names = {Path(i['file_name']).name for i in load_json(data.eval / 'test_full.json')['images']}
 
@@ -79,11 +104,13 @@ def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_imag
     base_boxes = defaultdict(list)
     for a in base_train['annotations']:
         base_boxes[a['image_id']].append(a)
+    variant = name or f'al_{selection}'  # before the copy loop below reuses ``name``
+    kept = _keep_v2(base_train, v2_keep, min_per_class) if v2_keep is not None else None
     for image in base_train['images']:
-        if image.get('source') != 'real':
+        if image.get('source') != 'real' and (kept is None or image['id'] in kept):
             add({k: v for k, v in image.items() if k != 'id'}, base_boxes[image['id']])
     train = {'images': images, 'annotations': annotations, 'categories': base_train['categories']}
-    if fixed_part_md5(train) != fixed_part_md5(base_train):
+    if kept is None and fixed_part_md5(train) != fixed_part_md5(base_train):
         raise AssertionError('fixed part changed')
 
     copied = 0
@@ -95,8 +122,9 @@ def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_imag
                 _link_or_copy(data.rpc / 'val2019' / name, target / name)
                 copied += 1
 
-    out = release / 'variants' / f'al_{selection}'
-    rows = load_json(base_dir / 'train_rows.json')
+    out = release / 'variants' / variant
+    rows_file = rows
+    rows = load_json(rows) if rows is not None else load_json(base_dir / 'train_rows.json')
     save_json(out / 'train_task_5_fix.json', train)
     save_json(out / 'train_rows.json', rows)
     per_source = defaultdict(int)
@@ -106,7 +134,7 @@ def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_imag
     for a in annotations:
         if a['category_id'] in row_set:
             objects_per_row[a['category_id']] += 1
-    manifest = {'variant': f'al_{selection}', 'rule': 'active learning: selected Val-A images x repeat + fixed part '
+    manifest = {'variant': variant, 'rule': 'active learning: selected Val-A images x repeat + fixed part '
                                                       f'of {base}; see tools/al_build_variant.py',
                 'base': base, 'base_train_md5': md5_file(base_dir / 'train_task_5_fix.json'),
                 'fixed_part_md5': fixed_part_md5(train), 'selection': selection,
@@ -118,7 +146,9 @@ def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_imag
                 'labelled_images': len(picked), 'labelled_boxes': sum(len(boxes[i]) for i in picked),
                 'objects_per_weak_sku': {str(r): objects_per_row[r] for r in rows},
                 'min_objects_any_row': min(objects_per_row[r] for r in rows),
-                'val_b_images_in_train': 0, 'calib_images_in_train': 0, 'images_copied': copied}
+                'val_b_images_in_train': 0, 'calib_images_in_train': 0, 'images_copied': copied,
+                'v2_keep': v2_keep, 'rows_file': str(rows_file) if rows_file else None,
+                'real_share': round(per_source.get('real', 0) / max(1, len(images)), 4)}
     save_json(out / 'manifest.json', manifest)
     return manifest
 
@@ -128,8 +158,17 @@ def main(argv: list[str] | None = None) -> list[dict]:
     ap.add_argument('--data', type=Path, help='the data folder (default: ../autocheckout-data or $AC_DATA)')
     ap.add_argument('--selection', nargs='+', required=True)
     ap.add_argument('--base', default='pilot')
+    ap.add_argument('--rows', type=Path,
+                    help='round 3: JSON list of the classifier rows to train (default: the base\'s)')
+    ap.add_argument('--repeat', type=int, help='round 3: repeat of the real images (default: the base\'s)')
+    ap.add_argument('--v2-keep', type=float, help='round 3: share of the base\'s v2 images kept (seeded)')
+    ap.add_argument('--min-per-class', type=int, default=100)
+    ap.add_argument('--name', help='round 3: variant name (default al_<selection>; one selection only)')
     args = ap.parse_args(argv)
-    return [build(args.data, s, args.base) for s in args.selection]
+    if args.name and len(args.selection) > 1:
+        ap.error('--name needs exactly one --selection')
+    return [build(args.data, s, args.base, rows=args.rows, repeat=args.repeat, v2_keep=args.v2_keep,
+                  min_per_class=args.min_per_class, name=args.name) for s in args.selection]
 
 
 if __name__ == '__main__':

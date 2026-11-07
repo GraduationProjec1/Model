@@ -87,7 +87,7 @@ finish_and_cleanup() {
 
         # Chốt an toàn: đếm .pth trên máy và trên Drive; thiếu thì KHÔNG destroy (chỉ stop) để còn lấy lại.
         local N_LOCAL N_REMOTE
-        N_LOCAL=$(find "$REPO_DIR/data/training/update-model" -name "*.pth" 2>/dev/null | wc -l)
+        N_LOCAL=$(find "$REPO_DIR/data/training/update-model" -type f -name "*.pth" 2>/dev/null | wc -l)  # not the symlinks in scored/
         N_REMOTE=$(rclone ls "$RCLONE_REMOTE/$RUN_ID/update-model" --include "*.pth" 2>/dev/null | wc -l)
         echo "[KIỂM TRA] Weights .pth: trên máy $N_LOCAL, trên Drive $N_REMOTE" | tee -a "$LOG_DIR/run_metadata.txt"
         if [[ "$N_REMOTE" -lt "$N_LOCAL" ]]; then

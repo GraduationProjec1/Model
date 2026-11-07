@@ -21,6 +21,8 @@ class Prompt(nn.Module):
         # B2: pools used in forward(); both by default (the paper's dual pool)
         self.use_shared = bool(getattr(args, 'use_shared_pool', True))
         self.use_private = bool(getattr(args, 'use_private_pool', True))
+        # round 3 (docs/design/2026-11-07-vong-3): train the private prompts of earlier tasks too (default: frozen)
+        self.tune_old_private = bool(getattr(args, 'tune_old_private', False))
         if not (self.use_shared or self.use_private):
             raise ValueError('at least one prompt pool must be used')
         self.total_classes = sum(self.task_num_classes)
@@ -268,14 +270,14 @@ class Prompt(nn.Module):
 
         # freeze/control past tasks
         if train:
-            if self.task_count > 0:
+            if self.task_count > 0 and not self.tune_old_private:
                 K_private = torch.cat((K[:s].detach().clone(), K[s:f]), dim=0)
                 A_private = torch.cat((A[:s].detach().clone(), A[s:f]), dim=0)
                 P_private = torch.cat((p[:s].detach().clone(), p[s:f]), dim=0)
-            else:
-                K_private = K[s:f]
-                A_private = A[s:f]
-                P_private = p[s:f]
+            else:  # task 1 (s == 0), or round 3 with --tune_old_private: earlier tasks' prompts train too
+                K_private = K[0:f]
+                A_private = A[0:f]
+                P_private = p[0:f]
         else:
             K_private = K[0:f]
             A_private = A[0:f]

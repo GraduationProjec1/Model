@@ -38,24 +38,28 @@ def collect(release: Path, campaign: Path) -> list[dict]:
             pairs = st.get('comparison', {}).get('pair_confusions_in_rows', {})
             row.update(cAcc_valb_policy=st['cAcc_m2'], AP50_other_base=st['AP50_other']['base'],
                        AP50_other_new=st['AP50_other']['new'], pairs_base=pairs.get('base'),
-                       pairs_new=pairs.get('new'), gate=st.get('gate', {}).get('decision'))
+                       pairs_new=pairs.get('new'), gate=st.get('gate', {}).get('decision'),
+                       cAcc_trained=st.get('cAcc_trained'), cAcc_pool_untrained=st.get('cAcc_pool_untrained'))
         rows.append(row)
     return rows
 
 
 def table(rows: list[dict], base: float | None) -> str:
     head = ('| Run | Chiến lược | Vòng | B | seed | cAcc Val-B (ngưỡng calib) | Δ so với r1 | cAcc (ngưỡng Val-B) | '
-            'AP50 SKU khác (trước→sau) | Nhầm trong 17 SKU | Ảnh / box gán nhãn | Cổng |')
-    lines = [head, '|' + '---|' * 12]
+            'AP50 SKU khác (trước→sau) | Nhầm trong 17 SKU | Ảnh / box gán nhãn | Cổng | '
+            'cAcc ảnh đã train / pool chưa train |')  # round 3: tools/fit_check.py
+    lines = [head, '|' + '---|' * 13]
     fmt = lambda v, p='.4f': '' if v is None else format(v, p)  # noqa: E731
     for r in sorted(rows, key=lambda r: (r['round'], r['budget'], r['strategy'], r['seed'] or 0)):
         delta = None if base is None else r['cAcc_calib'] - base
         ap = '' if 'AP50_other_new' not in r else f"{fmt(r['AP50_other_base'])}→{fmt(r['AP50_other_new'])}"
         pairs = '' if r.get('pairs_new') is None else f"{r['pairs_base']}→{r['pairs_new']}"
+        fit = '' if r.get('cAcc_trained') is None else f"{fmt(r['cAcc_trained'])} / {fmt(r['cAcc_pool_untrained'])}"
         lines.append(f"| {r['name']} | {r['strategy']} | {r['round']} | {r['budget']} | "
                      f"{'' if r['seed'] is None else r['seed']} | "
                      f"{fmt(r['cAcc_calib'])} | {fmt(delta, '+.4f')} | {fmt(r.get('cAcc_valb_policy'))} | {ap} | "
-                     f"{pairs} | {r['labelled_images']} / {r['labelled_boxes']} | {r.get('gate') or ''} |")
+                     f"{pairs} | {r['labelled_images']} / {r['labelled_boxes']} | {r.get('gate') or ''} | "
+                     f"{fit} |")
     return '\n'.join(lines)
 
 

@@ -113,3 +113,26 @@ def test_every_task_of_the_rpc_config_runs():
             (ek, ev), _, _ = prompt(torch.randn(2, 256), 0, None, train=train)
             assert ek.shape == (2, 5, 256) and ev.shape == (2, 5, 256)
     assert private(prompt, "k").norm(dim=1).min() > 0.99  # all 224 slots initialised
+
+
+
+# --- round 3 (docs/design/2026-11-07-vong-3, Task 6): --tune_old_private -------------------------------------------
+@pytest.mark.parametrize("tune, moves", [(0, False), (1, True)])
+def test_tune_old_private_lets_task1_prompts_learn_in_task5(tune, moves):
+    torch.manual_seed(0)
+    prompt = Prompt(emb_d=256, n_tasks=len(SIZES), prompt_param=[100, 10, 0], key_dim=256,
+                    args=SimpleNamespace(local_query=0, tune_old_private=tune), task_num_classes=SIZES)
+    train_step(prompt)  # stand-in for task 1
+    prompt.set_task_id(4)  # task 5 again, as the improve mode does
+    prompt.init_task_prompts()
+    before = private(prompt, "p")[:100].detach().clone()  # task 1 slots
+    grads = train_step(prompt)
+    for name in ("p", "k", "a"):
+        assert bool(grads[f"private_{name}_0"][:100].abs().sum() > 0) == moves
+    assert (not torch.equal(before, private(prompt, "p")[:100].detach())) == moves
+    s, f = task_slice(prompt, 4)
+    assert grads["private_p_0"][s:f].abs().sum() > 0  # the current task trains either way
+
+
+def test_tune_old_private_defaults_off():
+    assert make_prompt().tune_old_private is False

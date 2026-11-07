@@ -1,0 +1,321 @@
+{
+ "name": "al_margin_k_B500_r2",
+ "calib_images": 581,
+ "target_images": 2897,
+ "policies": {
+  "nms=0.35": {
+   "nms": 0.35,
+   "group_thresholds": [
+    0.1,
+    0.21,
+    0.3,
+    0.28,
+    0.1
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5473321858864028,
+   "val_b_cAcc": 0.525716258198136,
+   "ACD": 1.0583362098722817,
+   "mCCD": 0.08886396659833126,
+   "fixed_vs_base": 53,
+   "broken_vs_base": 147,
+   "sign_p": 2.055477698844251e-11,
+   "delta_vs_base": -0.03244735933724541
+  },
+  "nms=0.35+sku": {
+   "nms": 0.35,
+   "group_thresholds": [
+    0.1,
+    0.21,
+    0.3,
+    0.28,
+    0.1
+   ],
+   "sku_thresholds": {
+    "118": 0.46
+   },
+   "calib_cAcc": 0.5524956970740104,
+   "val_b_cAcc": 0.5229547808077322,
+   "ACD": 1.0586813945460822,
+   "mCCD": 0.08889114051137474,
+   "fixed_vs_base": 53,
+   "broken_vs_base": 155,
+   "sign_p": 8.616979118980321e-13,
+   "delta_vs_base": -0.035208836727649295
+  },
+  "nms=0.4": {
+   "nms": 0.4,
+   "group_thresholds": [
+    0.13,
+    0.21,
+    0.22,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5679862306368331,
+   "val_b_cAcc": 0.546427338626165,
+   "ACD": 1.0224370037970314,
+   "mCCD": 0.08607766268944672,
+   "fixed_vs_base": 9,
+   "broken_vs_base": 43,
+   "sign_p": 2.0377698612961126e-06,
+   "delta_vs_base": -0.011736278909216469
+  },
+  "nms=0.4+sku": {
+   "nms": 0.4,
+   "group_thresholds": [
+    0.13,
+    0.21,
+    0.22,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {
+    "118": 0.46
+   },
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5433206765619607,
+   "ACD": 1.022782188470832,
+   "mCCD": 0.0861048366024902,
+   "fixed_vs_base": 9,
+   "broken_vs_base": 52,
+   "sign_p": 1.802802378388091e-08,
+   "delta_vs_base": -0.01484294097342076
+  },
+  "base": {
+   "nms": 0.45,
+   "group_thresholds": [
+    0.13,
+    0.21,
+    0.22,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.576592082616179,
+   "val_b_cAcc": 0.5581636175353815,
+   "ACD": 0.9982740766309975,
+   "mCCD": 0.08410448642322202,
+   "fixed_vs_base": 0,
+   "broken_vs_base": 0,
+   "sign_p": 1.0,
+   "delta_vs_base": 0.0
+  },
+  "nms=0.45+sku": {
+   "nms": 0.45,
+   "group_thresholds": [
+    0.13,
+    0.21,
+    0.22,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.576592082616179,
+   "val_b_cAcc": 0.5581636175353815,
+   "ACD": 0.9982740766309975,
+   "mCCD": 0.08410448642322202,
+   "fixed_vs_base": 0,
+   "broken_vs_base": 0,
+   "sign_p": 1.0,
+   "delta_vs_base": 0.0
+  },
+  "nms=0.5": {
+   "nms": 0.5,
+   "group_thresholds": [
+    0.13,
+    0.21,
+    0.3,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5595443562305834,
+   "ACD": 0.9775629962029686,
+   "mCCD": 0.08236576396299222,
+   "fixed_vs_base": 37,
+   "broken_vs_base": 33,
+   "sign_p": 0.7202027723528613,
+   "delta_vs_base": 0.001380738695201944
+  },
+  "nms=0.5+sku": {
+   "nms": 0.5,
+   "group_thresholds": [
+    0.13,
+    0.21,
+    0.3,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5595443562305834,
+   "ACD": 0.9775629962029686,
+   "mCCD": 0.08236576396299222,
+   "fixed_vs_base": 37,
+   "broken_vs_base": 33,
+   "sign_p": 0.7202027723528613,
+   "delta_vs_base": 0.001380738695201944
+  },
+  "nms=0.55": {
+   "nms": 0.55,
+   "group_thresholds": [
+    0.14,
+    0.22,
+    0.3,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5581636175353815,
+   "ACD": 0.9827407663099759,
+   "mCCD": 0.08263228665903345,
+   "fixed_vs_base": 54,
+   "broken_vs_base": 54,
+   "sign_p": 1.0,
+   "delta_vs_base": 0.0
+  },
+  "nms=0.55+sku": {
+   "nms": 0.55,
+   "group_thresholds": [
+    0.14,
+    0.22,
+    0.3,
+    0.28,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5581636175353815,
+   "ACD": 0.9827407663099759,
+   "mCCD": 0.08263228665903345,
+   "fixed_vs_base": 54,
+   "broken_vs_base": 54,
+   "sign_p": 1.0,
+   "delta_vs_base": 0.0
+  },
+  "nms=0.6": {
+   "nms": 0.6,
+   "group_thresholds": [
+    0.14,
+    0.22,
+    0.3,
+    0.24,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5697074010327022,
+   "val_b_cAcc": 0.5543665861235761,
+   "ACD": 0.9982740766309975,
+   "mCCD": 0.08397741544235465,
+   "fixed_vs_base": 68,
+   "broken_vs_base": 79,
+   "sign_p": 0.4095804990264013,
+   "delta_vs_base": -0.0037970314118053183
+  },
+  "nms=0.6+sku": {
+   "nms": 0.6,
+   "group_thresholds": [
+    0.14,
+    0.22,
+    0.3,
+    0.24,
+    0.13
+   ],
+   "sku_thresholds": {
+    "162": 0.28
+   },
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5547117707973765,
+   "ACD": 0.9975837072833966,
+   "mCCD": 0.08393504256099872,
+   "fixed_vs_base": 68,
+   "broken_vs_base": 78,
+   "sign_p": 0.45648223496512574,
+   "delta_vs_base": -0.0034518467380049156
+  },
+  "nms=0.7": {
+   "nms": 0.7,
+   "group_thresholds": [
+    0.14,
+    0.22,
+    0.3,
+    0.24,
+    0.13
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.5697074010327022,
+   "val_b_cAcc": 0.5467725232999655,
+   "ACD": 1.0217466344494304,
+   "mCCD": 0.08584619302566415,
+   "fixed_vs_base": 74,
+   "broken_vs_base": 107,
+   "sign_p": 0.017139795178384862,
+   "delta_vs_base": -0.011391094235415955
+  },
+  "nms=0.7+sku": {
+   "nms": 0.7,
+   "group_thresholds": [
+    0.14,
+    0.22,
+    0.3,
+    0.24,
+    0.13
+   ],
+   "sku_thresholds": {
+    "162": 0.28
+   },
+   "calib_cAcc": 0.5731497418244407,
+   "val_b_cAcc": 0.5471177079737659,
+   "ACD": 1.0210562651018296,
+   "mCCD": 0.08580382014430821,
+   "fixed_vs_base": 74,
+   "broken_vs_base": 106,
+   "sign_p": 0.020597045422768055,
+   "delta_vs_base": -0.011045909561615552
+  },
+  "nms=off": {
+   "nms": null,
+   "group_thresholds": [
+    0.36,
+    0.25,
+    0.3,
+    0.28,
+    0.17
+   ],
+   "sku_thresholds": {},
+   "calib_cAcc": 0.4750430292598967,
+   "val_b_cAcc": 0.4680704176734553,
+   "ACD": 1.1560234725578185,
+   "mCCD": 0.09572937854642254,
+   "fixed_vs_base": 91,
+   "broken_vs_base": 352,
+   "sign_p": 2.78914940303442e-37,
+   "delta_vs_base": -0.09009319986192615
+  },
+  "nms=off+sku": {
+   "nms": null,
+   "group_thresholds": [
+    0.36,
+    0.25,
+    0.3,
+    0.28,
+    0.17
+   ],
+   "sku_thresholds": {
+    "80": 0.27
+   },
+   "calib_cAcc": 0.4784853700516351,
+   "val_b_cAcc": 0.46841560234725577,
+   "ACD": 1.1539523645150156,
+   "mCCD": 0.09555696475331908,
+   "fixed_vs_base": 91,
+   "broken_vs_base": 351,
+   "sign_p": 4.436736575181681e-37,
+   "delta_vs_base": -0.0897480151881257
+  }
+ }
+}
