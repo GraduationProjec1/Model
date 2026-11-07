@@ -69,11 +69,13 @@ r3_build() {
     local opts
     case $tag in
         rows|train) opts=(--rows configs/relearn/rows_r3.json --repeat 3) ;;
-        real|prompt) opts=(--rows configs/relearn/rows_r3.json --repeat 7 --v2-keep 0.5) ;;
-        all) opts=(--rows configs/relearn/rows_all.json --repeat 7 --v2-keep 0.5) ;;
+        real|prompt) opts=(--rows configs/relearn/rows_r3.json --repeat 8 --v2-keep 0.5) ;;
+        all) opts=(--rows configs/relearn/rows_all.json --repeat 8 --v2-keep 0.5) ;;
         *) echo "$v: tag vòng 3 lạ: $tag" >&2; return 1 ;;
     esac
-    python -m tools.al_build_variant --selection "$sel" --base e1 "${opts[@]}" --name "$v" 2>&1 | tee -a "$LOG"
+    # v1.5: SKU không có ảnh ghép đủ mặt giữ ảnh v2 khi cắt + bù v2 tới 600 vật (cần synth_v2 trong data)
+    python -m tools.al_build_variant --selection "$sel" --base e1 "${opts[@]}" --no-face-v2 600 --name "$v" \
+        2>&1 | tee -a "$LOG"
 }
 
 for v in "${VARIANTS[@]}"; do

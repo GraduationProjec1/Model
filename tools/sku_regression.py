@@ -112,12 +112,16 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
     images = sorted(a['correct'])
     fixed = sum(1 for i in images if not a['correct'][i] and b['correct'][i])
     broken = sum(1 for i in images if a['correct'][i] and not b['correct'][i])
+    def over(r: dict, label: int) -> int:  # round 3 v1.5: boxes counted as ``label`` without its object
+        return r['extra'][label] + sum(c for (t, p), c in r['swapped'].items() if p == label and t != label)
+
     per_sku = []
     for label in labels:
         n = a['objects'][label]
         if n:
             per_sku.append({'label': label, 'objects': n, 'base': a['right'][label] / n,
-                            'new': b['right'][label] / n, 'in_rows': label in rows})
+                            'new': b['right'][label] / n, 'in_rows': label in rows,
+                            'over_base': over(a, label), 'over_new': over(b, label)})
     falls = [s for s in per_sku if s['objects'] >= MIN_OBJECTS and s['base'] - s['new'] > FALL]
 
     def pairs(swapped: Counter) -> Counter:

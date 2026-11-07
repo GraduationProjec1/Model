@@ -159,3 +159,73 @@ def test_default_build_unchanged(release):
     m = bv.build(release, 's1')
     assert 'v2_keep' not in m or m['v2_keep'] is None
     assert m['images_per_source'] == {'real': 6, 'v2': 1, 'relearn': 1}
+
+
+def _no_face_setup(release, tmp_path):
+    """v1.5: rows 1, 2, 3; only SKU 3 has full-face synthetic images. synth_v2 task 1: 6 images of SKU 1, 3 of 2."""
+    rel = release / 'relearn/variants/pilot'
+    base = load_json(rel / 'train_task_5_fix.json')  # v2 image 2 -> SKU 2
+    base['images'] += [{'id': 10 + k, 'file_name': f'v2/task_1/{100 + k}.jpg', 'width': 10, 'height': 10,
+                        'orig_id': 100 + k, 'source': 'v2'} for k in range(8)]
+    base['annotations'] += [{'id': 10 + k, 'image_id': 10 + k, 'category_id': 0, 'bbox': [0, 0, 5, 5], 'area': 25,
+                             'iscrowd': 0} for k in range(8)]
+    _w(rel / 'train_task_5_fix.json', base)
+    rows, face = tmp_path / 'rows.json', tmp_path / 'selection.json'
+    rows.write_text(json.dumps([1, 2, 3]))
+    (tmp_path / 'configs/relearn').mkdir(parents=True)  # the round-3 group (bv.REPO is patched by the tests)
+    (tmp_path / 'configs/relearn/rows_r3.json').write_text(json.dumps([1, 2, 3]))
+    face.write_text(json.dumps({'low': [3], 'partners': [], 'faces': []}))
+    synth = release / 'synth_v2'
+    images = [{'id': 200 + k, 'file_name': f'images/task_1/{200 + k}.jpg', 'width': 10, 'height': 10,
+               'level': 'hard'} for k in range(6)]
+    anns = [{'id': k, 'image_id': 200 + k, 'category_id': 1, 'bbox': [0, 0, 5, 5], 'area': 25, 'iscrowd': 0}
+            for k in range(6)] + [{'id': 50, 'image_id': 200, 'category_id': 0, 'bbox': [5, 5, 3, 3], 'area': 9,
+                                   'iscrowd': 0}]
+    images += [{'id': 210 + k, 'file_name': f'images/task_1/{210 + k}.jpg', 'width': 10, 'height': 10,
+                'level': 'hard'} for k in range(3)]  # SKU 2
+    anns += [{'id': 60 + k, 'image_id': 210 + k, 'category_id': 2, 'bbox': [0, 0, 5, 5], 'area': 25, 'iscrowd': 0}
+             for k in range(3)]
+    _w(synth / 'tasks/synth_v2/train_task_1_gt_full.json', {'images': images, 'annotations': anns,
+                                                            'categories': CATS})
+    for image in images:
+        (synth / 'images/task_1').mkdir(parents=True, exist_ok=True)
+        (synth / image['file_name']).write_bytes(b'v')
+    (release / 'relearn/images/v2/task_1').mkdir(parents=True, exist_ok=True)
+    (release / 'relearn/images/v2/task_1/203.jpg').write_bytes(b'v')  # already in the release: preferred
+    return rows, face
+
+
+def test_round3_no_face_v2_tops_up_and_is_kept(release, tmp_path, monkeypatch):
+    monkeypatch.setattr(bv, 'REPO', tmp_path)
+    rows, face = _no_face_setup(release, tmp_path)
+    m = bv.build(release, 's1', rows=rows, no_face_v2=4, full_face=face, v2_keep=0.5, min_per_class=1, name='nf')
+    assert m['no_face_rows'] == [1, 2] and m['no_face_v2'] == 4
+    train = load_json(release / 'relearn/variants/nf/train_task_5_fix.json')
+    src = {i['id']: i for i in train['images']}
+    v2 = [a['category_id'] for a in train['annotations'] if src[a['image_id']]['source'] == 'v2']
+    assert v2.count(1) == 4 and v2.count(2) == 4  # topped up from synth_v2 to the quota
+    assert m['v2_added'] == {'1': 4, '2': 3}  # SKU 2: its one v2 image of the base survived --v2-keep (protected)
+    added = [i for i in train['images'] if i['file_name'].startswith('v2/task_1/2')]
+    assert '203.jpg' in {i['file_name'].rsplit('/', 1)[1] for i in added}  # release image picked first
+    assert all(i['source'] == 'v2' and i['level'] == 'hard' for i in added)
+    assert all((release / 'relearn/images' / i['file_name']).is_file() for i in added)
+    assert sum(1 for a in train['annotations'] if src[a['image_id']]['orig_id'] == 200) in (0, 2)  # full labels
+    again = bv.build(release, 's1', rows=rows, no_face_v2=4, full_face=face, v2_keep=0.5, min_per_class=1,
+                     name='nf2')
+    assert again['fixed_part_md5'] == m['fixed_part_md5']  # seeded
+
+
+def test_round3_no_face_v2_refuses_an_unreachable_quota(release, tmp_path, monkeypatch):
+    monkeypatch.setattr(bv, 'REPO', tmp_path)
+    rows, face = _no_face_setup(release, tmp_path)
+    with pytest.raises(ValueError, match='synth_v2'):
+        bv.build(release, 's1', rows=rows, no_face_v2=50, full_face=face, name='nf3')
+
+
+def test_round3_no_face_v2_only_for_the_round3_group(release, tmp_path, monkeypatch):
+    # rows_all-like runs: a row outside configs/relearn/rows_r3.json is not topped up
+    monkeypatch.setattr(bv, 'REPO', tmp_path)
+    rows, face = _no_face_setup(release, tmp_path)
+    (tmp_path / 'configs/relearn/rows_r3.json').write_text(json.dumps([2, 3]))
+    m = bv.build(release, 's1', rows=rows, no_face_v2=4, full_face=face, name='nf4')
+    assert m['no_face_rows'] == [2]

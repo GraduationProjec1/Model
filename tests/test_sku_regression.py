@@ -83,3 +83,25 @@ def test_reproduces_the_cacc_of_the_relearn_gate():
     assert report['cAcc_base'] == pytest.approx(0.4368093922651934, abs=1e-12)
     assert report['cAcc_new'] == pytest.approx(0.4469958563535912, abs=1e-12)
     assert (report['fixed'], report['broken']) == (517, 458)
+
+
+def test_per_sku_reports_extra_and_wrongly_called_boxes():
+    # vòng 3 v1.5 (11-C): số box đếm thừa theo SKU (box không khớp vật nào + vật khác bị gọi thành SKU này)
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from tools import sku_regression as sr
+
+    val = {'images': [{'id': 1}], 'annotations': [{'image_id': 1, 'category_id': 0, 'bbox': [0, 0, 10, 10]},
+                                                    {'image_id': 1, 'category_id': 1, 'bbox': [20, 0, 10, 10]}]}
+
+    def preds(labels, boxes):
+        return SimpleNamespace(label=np.array(labels), boxes=np.array(boxes, dtype=float).reshape(-1, 4),
+                               image_id=np.ones(len(labels), dtype=np.int64))
+
+    base = preds([0, 1], [[0, 0, 10, 10], [20, 0, 30, 10]])
+    new = preds([0, 0, 0], [[0, 0, 10, 10], [20, 0, 30, 10], [50, 50, 60, 60]])
+    per = {s['label']: s for s in sr.compare(val, base, new, [0, 1])['per_sku']}
+    assert (per[0]['over_base'], per[0]['over_new']) == (0, 2)  # 1 extra box + SKU 1 called 0
+    assert (per[1]['over_base'], per[1]['over_new']) == (0, 0)
