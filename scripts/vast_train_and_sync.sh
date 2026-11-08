@@ -31,6 +31,7 @@ INSTANCE_ID="${INSTANCE_ID:-}"
 #   - "al_dot1": Active Learning đợt 1 (7 run B=500: random x3, margin, margin_k, margin_bal, oracle)
 #   - "al_dot2": Active Learning đợt 2 (B=250, 850 + entropy)
 #   - "al_next": vòng 2 từ margin_k (+ random_s0 so sánh) rồi đợt 2; cần khôi phục campaign dot1 từ Drive trước
+#   - "al_r3": vòng 3 (5 run từ model al_margin_k_B500_r2); cần gpu_bundle_r3/install.sh chạy trước (campaign + gói r3)
 #   - "relearn_pilot": Chạy học lại pilot (17 SKU)
 #   - "relearn_e1": Chạy học lại E1 (63 SKU)
 #   - "naive": Chạy fine-tune thẳng (baseline B2)
@@ -218,6 +219,27 @@ case "$TASK" in
         [[ -f "$CAMP/stages/baseline.json" && -f "$CAMP/plan.json" ]] || { echo "[THIẾU] stages/baseline.json hoặc plan.json" | tee -a "$MAIN_LOG"; exit 3; }
         echo ">> Vòng 2 (margin_k_r2, random_s0_r2) rồi đợt 2 (dot2)..." | tee -a "$MAIN_LOG"
         bash scripts/run_al.sh al_margin_k_B500_r2 al_random_B500_s0_r2 dot2 2>&1 | tee -a "$MAIN_LOG"
+        ;;
+    al_r3)
+        # Vòng 3 (docs/design/2026-11-07-vong-3): 5 run từ model vòng 2, cùng 1.000 ảnh của margin_k_B500_r2.
+        # Cần campaign đã có al_margin_k_B500_r2 và 5 gói r3 (gpu_bundle_r3/install.sh làm cả hai). Thiếu thì dừng, chưa tốn GPU.
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        R3_RUNS=(al_margin_k_B500_r3_rows al_margin_k_B500_r3_train al_margin_k_B500_r3_real al_margin_k_B500_r3_all
+                 al_margin_k_B500_r3_prompt)
+        NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$CAMP/stages/al_margin_k_B500_r2.json"
+              "$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r2/task_5/task_final.pth"
+              "$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r2/task_5/pred_val.npz"
+              "$CAMP/scored/al_margin_k_B500_r2/calibration_count_m2.json"
+              "$DATA_DIR/relearn/active/selections/margin_k_B500_r2.json"
+              "$DATA_DIR/relearn/active/splits/val_a_split.json")
+        for v in "${R3_RUNS[@]}"; do
+            NEED+=("$DATA_DIR/relearn/variants/$v/train_task_5_fix.json" "$DATA_DIR/relearn/variants/$v/train_rows.json")
+        done
+        for f in "${NEED[@]}"; do
+            [[ -f "$f" ]] || { echo "[THIẾU] $f -> chạy gpu_bundle_r3/install.sh trước" | tee -a "$MAIN_LOG"; exit 3; }
+        done
+        echo ">> Vòng 3: rows, train, real, all, prompt (~10 giờ 4090)..." | tee -a "$MAIN_LOG"
+        bash scripts/run_al.sh "${R3_RUNS[@]}" 2>&1 | tee -a "$MAIN_LOG"
         ;;
     al_dot2)
         echo ">> Chạy Active Learning đợt 2 (B=250, 850 + entropy)..." | tee -a "$MAIN_LOG"
