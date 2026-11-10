@@ -243,3 +243,86 @@ def test_pilot_verdict_needs_a_clear_gain_without_forgetting(cacc, old_ap, decis
     from autocheckout.full_syn import pilot_verdict
     seed = {'cAcc_m2': 0.7364, 'AP50': {'mAP_P': 0.9496}}
     assert pilot_verdict({'cAcc_m2': cacc, 'AP50': {'mAP_P': old_ap}}, seed)[0] == decision
+
+
+@pytest.mark.slow
+def test_split_campaign_repartitions_the_seed_task_1_and_trains_the_new_tasks(tmp_path):
+    """Chia 12+13 SKU on the CPU fixture: a seed with tasks [2, 2, 2] gives its task 1 to a campaign with tasks
+    [2, 1, 1, 1, 1] (each later task split in two). The seed's task 1 is repartitioned (not linked), predicted again
+    and must score exactly as in the seed; then tasks 2..5 train; a second pass trains nothing."""
+    import torch
+
+    from autocheckout import full_syn
+    base = dict(round=1, artifact_root=str(tmp_path), dry_run=True, batch_size=1, effective_batch=2,
+                resolution=640, fsa_epochs=8, epochs=16, audit_images=4)
+    seed = full_syn.prepare({**base, 'campaign_id': 'seed', 'dry_task_sizes': [2, 2, 2]})
+    assert len(seed['train_images']) == 3
+    full_syn.stage_fsa(seed)
+    full_syn.stage_task1(seed)
+    seed_task1 = tmp_path / 'dry_run/seed/runs/EXP-FULL-SYN/task_1/task_final.pth'
+    before = sha(seed_task1)
+
+    with pytest.raises(ValueError, match='seed_campaign'):
+        full_syn.prepare({**base, 'campaign_id': 'nos', 'seed_task_config': seed['task_config']})
+    settings = {**base, 'campaign_id': 'split', 'seed_campaign': str(tmp_path / 'dry_run/seed'),
+                'seed_task_config': seed['task_config']}
+    plan = full_syn.prepare(settings)
+    assert len(plan['train_images']) == 5 and full_syn._repartitioned(plan)
+    with pytest.raises(RuntimeError, match='stage_seed'):
+        full_syn.stage_task1_predict(plan)
+    seeded = full_syn.stage_seed(plan)
+    run = tmp_path / 'dry_run/split/runs/EXP-FULL-SYN'
+    assert not (run / 'task_1').is_symlink()
+    assert (tmp_path / 'dry_run/split/runs' / full_syn.FSA).is_symlink()
+    new = torch.load(run / 'task_1/task_final.pth', map_location='cpu')
+    old = torch.load(seed_task1, map_location='cpu')
+    assert new['runtime']['model_config']['task_num_classes'] == [2, 1, 1, 1, 1]
+    assert all(torch.equal(new['model'][k], old['model'][k]) for k in old['model'])
+    assert seeded['repartition']['task_num_classes'] == [2, 1, 1, 1, 1]
+    assert not (run / 'calibration_count_m2.json').exists()  # task 1 is scored again, on the new labels
+    assert not (tmp_path / 'dry_run/split/stages/task1.json').exists()
+    with pytest.raises(RuntimeError, match='run stage task1 first'):
+        full_syn.stage_tasks(plan)
+
+    smoke = full_syn.stage_smoke_split(plan, steps=1)
+    assert smoke['task2']['optimizer_steps'] == 2 and smoke['task2']['resume_verification']['state_equal']
+    assert not (run / 'task_2').exists()  # the smoke trains in smoke_split/, not in the campaign
+
+    task1 = full_syn.stage_task1_predict(plan)
+    assert task1['gate']['decision'] == 'go' and task1['gate']['predictions_equal']
+    assert task1['cAcc_m2'] == pytest.approx(load_json(tmp_path / 'dry_run/seed/stages/task1.json')['cAcc_m2'])
+
+    report = full_syn.stage_tasks(plan, last=3, min_precision={t: 0.0 for t in range(2, 6)})
+    assert set(report['tasks']) == {2, 3} and report['stage'] == 3
+    report = full_syn.stage_tasks(plan)
+    assert set(report['tasks']) == {2, 3, 4, 5} and report['stage'] == 5
+    for task in range(2, 6):
+        log = load_json(run / f'task_{task}/task_log.json')
+        assert {'cAcc_m1_groups', 'pseudo_labels'} <= set(log)
+        assert len(log['thresholds_groups']) == task
+    assert sha(seed_task1) == before
+
+    again = full_syn.prepare(settings)
+    assert full_syn.stage_seed(again)['repartition'] == seeded['repartition']
+    assert full_syn.stage_task1_predict(again)['finished_at'] == task1['finished_at']
+    full_syn.stage_tasks(again)
+    logs = sorted((tmp_path / 'dry_run/split/attempts/task5').glob('*/*_runner.log'), key=lambda p: p.stat().st_mtime)
+    assert 'done, skipped' in logs[-1].read_text()
+
+
+def test_precision_floor_stops_before_training_the_task(tmp_path, monkeypatch):
+    """Plan 5: a teacher precision below the floor of a task stops the round before that task trains."""
+    from autocheckout import full_syn
+    plan = dict(root=str(tmp_path), runs=str(tmp_path / 'runs'), dry_run=False, campaign_id='c', round=1,
+                release_config_sha256='x', input_sha256={}, train_images=[1] * 9, pdp_experiment=full_syn.PDP,
+                seed_root='')
+    (tmp_path / 'stages').mkdir()
+    (tmp_path / 'stages/task1.json').write_text(json.dumps({'cAcc_m2': 0.8, 'gate': None}))
+    trained = []
+    monkeypatch.setattr(full_syn, '_audit', lambda plan, record, attempt, task: {'all': {'precision': 0.96}})
+    monkeypatch.setattr(full_syn, '_train', lambda *a, **k: trained.append(k['start']))
+    with pytest.raises(full_syn.GateStop, match='0.96 < 0.97'):
+        full_syn.stage_tasks(plan, last=3, min_precision={2: 0.97})
+    assert trained == []
+    with pytest.raises(ValueError, match='last must be'):
+        full_syn.stage_tasks(plan, last=10)

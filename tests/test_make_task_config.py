@@ -1,4 +1,5 @@
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -65,3 +66,69 @@ def test_cli_writes_a_loadable_config(tmp_path, capsys):
     printed = capsys.readouterr().out
     assert "total                      100    25    25    25    25    200" in printed
     assert "224 slots" in printed
+
+
+# --- split of tasks >= 2 (docs/design/2026-11-09-chia-12-13-sku) -------------------------------------------------
+def test_split_keeps_task_1_and_reserved_and_splits_every_later_task():
+    from tools.make_task_config import split_task_config
+
+    old = build_task_config(rpc_like_categories(), SIZES, reserved=24, seed=0, name="100-4x25_seed0")
+    new = split_task_config(old, [12, 13], seed=0, name="100-8x12-13_seed0")
+    assert [t.num_classes for t in new.tasks] == [100, 12, 13, 12, 13, 12, 13, 12, 13, 24]
+    assert new.num_slots == old.num_slots and new.num_classes == old.num_classes
+    assert new.tasks[0].classes == old.tasks[0].classes  # labels, names, RPC ids of task 1 unchanged
+    assert new.tasks[-1].reserved and new.tasks[-1].offset == 200
+    for t in range(2, 6):
+        halves = {c.rpc_category_id for c in new.task(2 * t - 2).classes} | {
+            c.rpc_category_id for c in new.task(2 * t - 1).classes}
+        assert halves == {c.rpc_category_id for c in old.task(t).classes}
+    labels = [c.label for t in new.tasks for c in t.classes]
+    assert labels == list(range(224))
+    for task in new.data_tasks:
+        assert [c.rpc_category_id for c in task.classes] == sorted(c.rpc_category_id for c in task.classes)
+    assert split_task_config(old, [12, 13], 0, "x") == split_task_config(old, [12, 13], 0, "x")
+
+
+def test_split_shares_supercategories_and_refuses_bad_sizes():
+    from tools.make_task_config import split_task_config
+
+    old = build_task_config(rpc_like_categories(), SIZES, reserved=24, seed=0, name="a")
+    new = split_task_config(old, [12, 13], seed=0, name="b")
+    for t in range(2, 6):
+        per_group = Counter(c.supercategory for c in old.task(t).classes)
+        a, b = (Counter(c.supercategory for c in new.task(n).classes) for n in (2 * t - 2, 2 * t - 1))
+        assert all(a[g] + b[g] == n for g, n in per_group.items())
+        assert all(abs(a[g] - n * 12 / 25) < 1 for g, n in per_group.items())
+    with pytest.raises(ValueError, match="add up"):
+        split_task_config(old, [12, 12], seed=0, name="c")
+
+
+def test_cli_split_from_writes_the_split_config(tmp_path, capsys):
+    from tools.make_task_config import split_task_config
+
+    old = build_task_config(rpc_like_categories(), SIZES, reserved=24, seed=0, name="100-4x25_seed0")
+    old.save(tmp_path / "old.json")
+    out = tmp_path / "split.json"
+    main(["--split-from", str(tmp_path / "old.json"), "--split", "12,13", "--name", "100-8x12-13_seed0",
+          "--out", str(out)])
+    assert TaskConfig.load(out) == split_task_config(old, [12, 13], 0, "100-8x12-13_seed0")
+    assert "224 slots (24 reserved)" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(["--name", "x", "--out", str(out)])  # neither --categories nor --split-from
+
+
+REAL_OLD = Path(__file__).resolve().parents[1] / "configs/tasks_100-4x25_seed0.json"
+REAL_NEW = Path(__file__).resolve().parents[1] / "configs/tasks_100-8x12-13_seed0.json"
+
+
+def test_committed_split_config_is_the_split_of_the_r1_config():
+    """V11 of 03-verify-report.md: 2a is these 12 SKUs; 98_milk lands in 4b (task 7), 97_milk in 5b (task 9)."""
+    from tools.make_task_config import split_task_config
+
+    new = split_task_config(TaskConfig.load(REAL_OLD), [12, 13], 0, "100-8x12-13_seed0")
+    assert new == TaskConfig.load(REAL_NEW)
+    assert sorted(c.name for c in new.task(2).classes) == [
+        "115_canned_food", "132_chocolate", "143_candy", "17_dried_fruit", "180_tissue", "24_dried_food",
+        "32_instant_drink", "46_instant_noodles", "63_dessert", "73_drink", "93_alcohol", "99_milk"]
+    where = {c.name: t.task_id for t in new.data_tasks for c in t.classes}
+    assert where["98_milk"] == 7 and where["97_milk"] == 9

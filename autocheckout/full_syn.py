@@ -25,7 +25,9 @@ import numpy as np
 from autocheckout.io import load_json, md5_file
 from autocheckout.predictions import load_predictions, save_predictions
 
-N_TASKS = 5
+N_TASKS = 5  # data tasks of the locked 100+4x25 protocol; a campaign's own count is _n_tasks(plan)
+# Task sizes a real campaign may train: r1's protocol and its 12+13-SKU split (docs/design/2026-11-09-chia-12-13-sku)
+PROTOCOLS = ([100, 25, 25, 25, 25], [100, 12, 13, 12, 13, 12, 13, 12, 13])
 
 
 def sha256_file(path: Path) -> str:
@@ -36,7 +38,7 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def link_tasks(release: Path, eval_root: Path, target: Path) -> dict[str, str]:
+def link_tasks(release: Path, eval_root: Path, target: Path, n_tasks: int = N_TASKS) -> dict[str, str]:
     """F0.1: the annotation folder of a run, as symlinks: synthetic train_task_<t>.json, real val_task_<t>.json,
     val_full.json and test_full.json. Never the train_task_<t>_gt_full.json audit files (old-class objects of the
     synthetic images would become replay). Every file is checked against its release manifest; returns
@@ -44,7 +46,7 @@ def link_tasks(release: Path, eval_root: Path, target: Path) -> dict[str, str]:
     synth = load_json(release / 'manifest.json')['tasks']
     real = load_json(eval_root / 'manifest.json')['files']
     sources = {}
-    for t in range(1, N_TASKS + 1):
+    for t in range(1, n_tasks + 1):
         sources[f'train_task_{t}.json'] = (release / 'tasks/synth_v2' / f'train_task_{t}.json',
                                            synth[str(t)]['files'][f'train_task_{t}.json'])
         sources[f'val_task_{t}.json'] = (eval_root / f'val_task_{t}.json', real[f'val_task_{t}.json']['sha256'])
@@ -120,18 +122,19 @@ class GateStop(RuntimeError):
     """A gate of the plan stops the round; the notebook cell fails with the decision."""
 
 
-def _toy_releases(root: Path) -> tuple[Path, Path, Path, Path]:
-    """Dry run: the six-label CPU fixture of training_workflow, laid out as a synthetic release and an evaluation
-    set with manifests. Returns (release, eval_root, images, model_config)."""
+def _toy_releases(root: Path, sizes: list[int] | None = None) -> tuple[Path, Path, Path, Path]:
+    """Dry run: the six-label CPU fixture of training_workflow (five tasks, or the task ``sizes`` given), laid out as a
+    synthetic release and an evaluation set with manifests. Returns (release, eval_root, images, model_config)."""
     from autocheckout.io import save_json
     from autocheckout.training_workflow import _toy_inputs
 
     toy, release, eval_root = root / 'toy', root / 'synth', root / 'eval'
-    _toy_inputs(toy)
+    _toy_inputs(toy, sizes) if sizes else _toy_inputs(toy)
+    n_tasks = len(sizes) if sizes else N_TASKS
     if not (eval_root / 'manifest.json').is_file():
         train_full = load_json(toy / 'tasks/train_full.json')
         tasks = {}
-        for t in range(1, N_TASKS + 1):
+        for t in range(1, n_tasks + 1):
             save_json(release / 'tasks/synth_v2' / f'train_task_{t}.json',
                       load_json(toy / f'tasks/train_task_{t}.json'))
             save_json(release / 'tasks/synth_v2' / f'train_task_{t}_gt_full.json', train_full)
@@ -139,7 +142,7 @@ def _toy_releases(root: Path) -> tuple[Path, Path, Path, Path]:
                                        for n in (f'train_task_{t}.json', f'train_task_{t}_gt_full.json')}}
         save_json(release / 'manifest.json', {'config_sha256': 'dry-run', 'tasks': tasks})
         test = load_json(toy / 'tasks/test_full.json')
-        names = [f'val_task_{t}.json' for t in range(1, N_TASKS + 1)] + ['val_full.json', 'test_full.json']
+        names = [f'val_task_{t}.json' for t in range(1, n_tasks + 1)] + ['val_full.json', 'test_full.json']
         for name in names:
             save_json(eval_root / name, load_json(toy / 'tasks' / name))
         first = test['images'][0]['id']
@@ -180,7 +183,7 @@ def prepare(settings: dict) -> dict:
     if seed is not None and load_json(seed / 'plan.json')['dry_run'] != dry:
         raise ValueError('a dry run and a real run cannot seed each other')
     if dry:
-        release, eval_root, images, model = _toy_releases(root / 'fixture')
+        release, eval_root, images, model = _toy_releases(root / 'fixture', settings.get('dry_task_sizes'))
         synth_root = raw = images
         detector = backbone = ''
     else:
@@ -194,13 +197,14 @@ def prepare(settings: dict) -> dict:
             if not path.is_file():
                 raise FileNotFoundError(f'pinned pretrained weights missing: {path}')
     task_dir = root / 'inputs/tasks'
-    hashes = link_tasks(release, eval_root, task_dir)
     task_config = eval_root / 'task_config.json'
+    cfg = TaskConfig.load(task_config)
+    n_tasks = len(cfg.data_tasks)
+    hashes = link_tasks(release, eval_root, task_dir, n_tasks)
     if sha256_file(task_config) != sha256_file(release / 'task_config.json'):
         raise ValueError('task_config.json of the synthetic release and of the evaluation set differ')
-    cfg = TaskConfig.load(task_config)
-    if not dry and [t.num_classes for t in cfg.data_tasks] != [100, 25, 25, 25, 25]:
-        raise ValueError('FULL-SYN requires the locked 100+4x25 protocol')
+    if not dry and [t.num_classes for t in cfg.data_tasks] not in PROTOCOLS:
+        raise ValueError(f'FULL-SYN requires one of the locked protocols {PROTOCOLS}')
     plan = dict(campaign_id=settings['campaign_id'], round=round_id, dry_run=dry, root=str(root),
                 runs=str(root / 'runs'), release_root=str(release), eval_root=str(eval_root),
                 synth_root=str(synth_root),
@@ -217,12 +221,19 @@ def prepare(settings: dict) -> dict:
                 pretrained_md5={} if dry else {'detector': md5_file(Path(detector) / 'model.safetensors'),
                                                'backbone': md5_file(backbone)},
                 train_images=[len(load_json(task_dir / f'train_task_{t}.json')['images'])
-                              for t in range(1, N_TASKS + 1)],
+                              for t in range(1, n_tasks + 1)],
                 pdp_experiment=experiment, seed_root=str(seed) if seed else '',
                 seed=_seed_identity(seed, experiment) if seed else None)
+    if settings.get('seed_task_config'):
+        # The seed was trained under another task split (chia 12+13 SKU): stage_seed repartitions its task 1. Only
+        # campaigns that set it get these keys, so the plans of earlier campaigns keep comparing equal.
+        if seed is None:
+            raise ValueError('seed_task_config needs a seed_campaign')
+        seed_cfg = resolve(settings['seed_task_config'])
+        plan.update(seed_task_config=str(seed_cfg), seed_task_config_sha256=sha256_file(seed_cfg))
     path = root / 'plan.json'
     locations = {'root', 'runs', 'release_root', 'eval_root', 'synth_root', 'raw_root', 'task_dir', 'task_config',
-                 'model_config', 'detector_dir', 'backbone_weights', 'seed_root'}
+                 'model_config', 'detector_dir', 'backbone_weights', 'seed_root', 'seed_task_config'}
     if path.is_file():
         previous = load_json(path)
         if {k: v for k, v in previous.items() if k not in locations} != {k: v for k, v in plan.items()
@@ -474,6 +485,16 @@ def _not_seeded(plan: dict, stage: str) -> None:
         raise RuntimeError(f'{stage} comes from the seed campaign here: run stage_seed')
 
 
+def _n_tasks(plan: dict) -> int:
+    """Data tasks of the campaign (5 for 100+4x25, 9 for the 12+13-SKU split)."""
+    return len(plan['train_images'])
+
+
+def _repartitioned(plan: dict) -> bool:
+    """The seed was trained under another task config: its task 1 is repartitioned, not linked (stage_seed)."""
+    return bool(plan.get('seed_task_config')) and plan['seed_task_config_sha256'] != plan['task_config_sha256']
+
+
 def stage_seed(plan: dict) -> dict:
     """FSA and PDP task 1 of the seed campaign, reused by a campaign that only changes tasks >= 2 (M5): their stage
     reports are copied, the FSA run and task_1 are linked, and the stage-1 counting policies are copied (later
@@ -485,6 +506,8 @@ def stage_seed(plan: dict) -> dict:
         raise ValueError(f'task 1 of {seed} changed since this campaign was prepared')
     run = Path(plan['runs']) / plan['pdp_experiment']
     run.mkdir(parents=True, exist_ok=True)
+    if _repartitioned(plan):
+        return _seed_repartitioned(plan, seed, root, run)
     links = ((Path(plan['runs']) / FSA, seed / 'runs' / FSA), (run / 'task_1', seed / 'runs' / PDP / 'task_1'))
     for link, source in links:
         if not link.is_symlink():
@@ -503,6 +526,47 @@ def stage_seed(plan: dict) -> dict:
         reports[stage] = load_json(path)
     write_summary(plan)
     return reports
+
+
+def _seed_repartitioned(plan: dict, seed: Path, root: Path, run: Path) -> dict:
+    """stage_seed when the seed has another task config (chia 12+13 SKU, plan 3.2): FSA is linked as usual, but
+    task_1 is a real folder holding only the seed's task_final.pth repartitioned to this campaign's config (same
+    tensors, new task_num_classes). Its predictions, counting policies and stages/task1.json are not copied: the
+    labels of the evaluation files changed, so stage_task1_predict predicts and scores task 1 again."""
+    import torch
+
+    from autocheckout.io import save_json
+    from autocheckout.taskcfg import TaskConfig
+    from pdp.expand import repartition_checkpoint
+
+    fsa = Path(plan['runs']) / FSA
+    if not fsa.is_symlink():
+        fsa.symlink_to((seed / 'runs' / FSA).resolve())
+    elif fsa.resolve() != (seed / 'runs' / FSA).resolve():
+        raise ValueError(f'{fsa} points to {fsa.resolve()}, expected {seed / "runs" / FSA}')
+    task1 = run / 'task_1'
+    if task1.is_symlink():
+        raise ValueError(f'{task1} links the seed task 1; a repartitioned campaign needs its own folder')
+    final, receipt = task1 / 'task_final.pth', task1 / 'repartition.json'
+    if not final.is_file():
+        source = seed / 'runs' / PDP / 'task_1/task_final.pth'
+        old_cfg, new_cfg = TaskConfig.load(plan['seed_task_config']), TaskConfig.load(plan['task_config'])
+        learned = old_cfg.data_tasks[0].num_classes
+        checkpoint = repartition_checkpoint(torch.load(source, map_location='cpu'), old_cfg, new_cfg, learned)
+        task1.mkdir(parents=True, exist_ok=True)
+        tmp = final.with_name(final.name + '.tmp')
+        torch.save(checkpoint, tmp)
+        os.replace(tmp, final)
+        save_json(receipt, {'source': str(source), 'source_md5': plan['seed']['task1_md5'], 'md5': md5_file(final),
+                            'old_config': old_cfg.name, 'new_config': new_cfg.name, 'learned': learned,
+                            'task_num_classes': checkpoint['runtime']['model_config']['task_num_classes']}, indent=2)
+    if load_json(receipt)['md5'] != md5_file(final):
+        raise ValueError(f'{final} changed since it was repartitioned')
+    path = root / 'stages/fsa.json'
+    if not path.is_file():
+        save_json(path, {**load_json(seed / 'stages/fsa.json'), 'seeded_from': plan['seed']}, indent=2)
+    write_summary(plan)
+    return {'fsa': load_json(path), 'repartition': load_json(receipt)}
 
 
 def stage_fsa(plan: dict) -> dict:
@@ -549,6 +613,46 @@ def stage_task1(plan: dict) -> dict:
     return _finish(plan, 'task1', report, gate)
 
 
+TASK1_LOSSLESS_TOL, TASK1_PRED_TOL = 0.001, 1e-5  # plan 3.2 and R11: repartitioning must not change task 1
+
+
+def stage_task1_predict(plan: dict) -> dict:
+    """Task 1 of a repartitioned seed (plan 3.2): no training, only the val predictions of the repartitioned
+    checkpoint (run_exp.sh: task_final.pth without pred_val.npz -> --predict_only), scored like any stage. Gate: the
+    predictions equal the seed's (boxes, scores, labels, image ids within TASK1_PRED_TOL) and val cAcc-M2 is the
+    seed's within TASK1_LOSSLESS_TOL; otherwise the repartition or the evaluation files are wrong and the round
+    stops."""
+    if not _repartitioned(plan):
+        raise RuntimeError('stage_task1_predict is for a repartitioned seed; use stage_seed / stage_task1')
+    done = Path(plan['root']) / 'stages/task1.json'
+    if done.is_file():
+        return _require(plan, 'task1')
+    experiment, seed = plan['pdp_experiment'], Path(plan['seed_root'])
+    run = Path(plan['runs']) / experiment
+    if not (run / 'task_1/repartition.json').is_file():
+        raise RuntimeError('run stage_seed first')
+    _require(plan, 'fsa')
+    with _attempt(plan, 'task1') as (record, attempt):
+        _train(plan, record, attempt, experiment, start=1, n=1, epochs=plan['epochs'], splits='val',
+               fsa_hf=_fsa_hf(plan))
+    report = score_val(plan, run, 1)
+    mine = load_predictions(run / 'task_1/pred_val.npz')
+    theirs = load_predictions(seed / 'runs' / PDP / 'task_1/pred_val.npz')
+    same = (len(mine) == len(theirs) and np.array_equal(mine.image_id, theirs.image_id)
+            and np.array_equal(mine.label, theirs.label) and np.array_equal(mine.query, theirs.query)
+            and np.allclose(mine.score, theirs.score, atol=TASK1_PRED_TOL, rtol=0)
+            and np.allclose(mine.boxes, theirs.boxes, atol=TASK1_PRED_TOL * max(1.0, float(np.abs(theirs.boxes).max(
+                initial=0))), rtol=0))
+    expected = load_json(seed / 'stages/task1.json')['cAcc_m2']
+    delta = report['cAcc_m2'] - expected
+    passed = same and abs(delta) <= TASK1_LOSSLESS_TOL
+    gate = _gate(plan, 'task 1 after repartition', 'go' if passed else 'stop',
+                 f"predictions {'equal' if same else 'DIFFER'} to the seed's; val cAcc-M2 {report['cAcc_m2']:.4f} vs "
+                 f"seed {expected:.4f} ({delta:+.4f}, tolerance {TASK1_LOSSLESS_TOL})",
+                 value=report['cAcc_m2'], seed_value=expected, predictions_equal=same)
+    return _finish(plan, 'task1', {**report, 'repartitioned_from': load_json(run / 'task_1/repartition.json')}, gate)
+
+
 def _audit(plan: dict, record: dict, attempt: Path, task: int) -> dict:
     """V4/F0.6: the teacher of task ``task`` (model after task - 1) and PPG on audit_images synthetic images of the
     task, against train_task_<t>_gt_full.json (read from the release, never from the training folder)."""
@@ -568,11 +672,15 @@ def _audit(plan: dict, record: dict, attempt: Path, task: int) -> dict:
     return load_json(result)
 
 
-def stage_tasks(plan: dict, last: int = N_TASKS) -> dict:
-    """G3: tasks 2..last (5). Before training task t, the pseudo-labels its teacher gives are audited (at task 2 they
-    must reach PSEUDO_PRECISION_MIN); after it, the stage is scored on val and logged in task_<t>/task_log.json."""
+def stage_tasks(plan: dict, last: int | None = None, min_precision: dict[int, float] | None = None) -> dict:
+    """G3: tasks 2..last (default: every task of the campaign). Before training task t, the pseudo-labels its teacher
+    gives are audited (at task 2 they must reach PSEUDO_PRECISION_MIN, and at a task of ``min_precision`` its value);
+    after it, the stage is scored on val and logged in task_<t>/task_log.json."""
     from autocheckout.io import save_json
 
+    last = _n_tasks(plan) if last is None else last
+    if not 2 <= last <= _n_tasks(plan):
+        raise ValueError(f'last must be 2..{_n_tasks(plan)}')
     _require(plan, 'task1')
     experiment = plan['pdp_experiment']
     if experiment == M5 and last > M5_LAST_TASK:
@@ -592,6 +700,12 @@ def stage_tasks(plan: dict, last: int = N_TASKS) -> dict:
                              value=precision, threshold=PSEUDO_PRECISION_MIN)
                 if gate['decision'] == 'stop':
                     _finish(plan, 'tasks', {'stage': 2, 'pseudo_labels': audit}, gate)
+            floor = (min_precision or {}).get(task)
+            if floor is not None and experiment != NAIVE and (precision is None or precision < floor):
+                gate = _gate(plan, f'pseudo-labels task {task}', 'stop',
+                             f'teacher precision {precision} < {floor}; report to the team before training task {task}',
+                             value=precision, threshold=floor)
+                _finish(plan, 'tasks', {'stage': task, 'pseudo_labels': audit}, gate)
             _train(plan, record, attempt, experiment, start=task, n=task, epochs=plan['epochs'], splits='val',
                    fsa_hf=_fsa_hf(plan))
         report = score_val(plan, run, task)
@@ -630,14 +744,14 @@ def stage_final_test(plan: dict) -> dict:
     if done.is_file():
         print(f'test already scored on {load_json(done)["finished_at"]}; not recomputed')
         return load_json(done)
-    if _require(plan, 'tasks')['stage'] != N_TASKS:
-        raise RuntimeError(f'test is scored after task {N_TASKS} only')
+    if _require(plan, 'tasks')['stage'] != _n_tasks(plan):
+        raise RuntimeError(f'test is scored after task {_n_tasks(plan)} only')
     if plan['pdp_experiment'] == NAIVE:
         raise RuntimeError(f'{NAIVE} is a lower bound scored on val only')
     experiment = plan['pdp_experiment']
     run = Path(plan['runs']) / experiment
     with _attempt(plan, 'final_test') as (record, attempt):
-        _train(plan, record, attempt, experiment, start=1, n=N_TASKS, epochs=plan['epochs'], splits='test',
+        _train(plan, record, attempt, experiment, start=1, n=_n_tasks(plan), epochs=plan['epochs'], splits='test',
                fsa_hf=_fsa_hf(plan))
     cfg = TaskConfig.load(plan['task_config'])
     test = Path(plan['task_dir']) / 'test_full.json'
@@ -686,7 +800,7 @@ def write_summary(plan: dict) -> Path:
                      f"{report.get('train_hours', '-')} | {gate['decision'] + ': ' + gate['reason'] if gate else ''} |")
     stop = (stages.get('tasks') or {}).get('gate')
     if stop:
-        lines += ['', f"Tasks 2-5: {stop['decision']} - {stop['reason']}"]
+        lines += ['', f"Tasks 2-{_n_tasks(plan)}: {stop['decision']} - {stop['reason']}"]
     final = stages.get('final_test')
     if final:
         lines += ['', '## Test (scored once, policies chosen on val)', '',
@@ -711,7 +825,7 @@ def check_data(plan: dict, sample: int = 300) -> dict:
     from autocheckout.training_workflow import REPO
 
     missing = {}
-    for name in [f'train_task_{t}.json' for t in range(1, N_TASKS + 1)] + ['val_full.json', 'test_full.json']:
+    for name in [f'train_task_{t}.json' for t in range(1, _n_tasks(plan) + 1)] + ['val_full.json', 'test_full.json']:
         root = Path(plan['synth_root'] if name.startswith('train') else plan['raw_root'])
         images = load_json(Path(plan['task_dir']) / name)['images']
         missing[name] = sum(not (root / image['file_name']).is_file() for image in images)
@@ -783,5 +897,44 @@ def stage_smoke(plan: dict, steps: int = 200) -> dict:
                         tasks_2_5=round(sum(hours(n, plan['epochs'], 1.47 * seconds) for n in images[1:]), 2))
     report['training_hours_estimate'] = {**estimate, 'note': 'training steps only; validation every epoch '
                                          '(val_task_<t>, 5,562 images at task 1) and test predictions come on top'}
+    save_json(runs / 'smoke_report.json', report, indent=2)
+    return report
+
+
+def stage_smoke_split(plan: dict, steps: int = 200, task: int = 2) -> dict:
+    """Smoke of a repartitioned campaign (chia 12+13 SKU), in its own folder (smoke_split/): data check, then task
+    ``task`` from the repartitioned task 1 for ``steps`` optimizer steps, stopped and resumed for as many again. It
+    runs the new task config through main.py (runtime check, teacher, private pool of the new task boundaries) on
+    the rented GPU before the long run; the campaign's own runs are not touched."""
+    from autocheckout.io import save_json
+
+    if not _repartitioned(plan):
+        raise RuntimeError('stage_smoke_split is for a repartitioned seed; use stage_smoke')
+    experiment = plan['pdp_experiment']
+    source = Path(plan['runs']) / experiment
+    if not (source / 'task_1/repartition.json').is_file():
+        raise RuntimeError('run stage_seed first')
+    runs = Path(plan['root']) / 'smoke_split'
+    (runs / experiment).mkdir(parents=True, exist_ok=True)
+    for t in range(1, task):
+        link = runs / experiment / f'task_{t}'
+        if not link.is_symlink():
+            link.symlink_to((source / f'task_{t}').resolve())
+    with _attempt(plan, 'smoke_split') as (record, attempt):
+        report = {'data': check_data(plan)}
+        try:
+            import torch
+            report['gpu'] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+        except ImportError:
+            report['gpu'] = None
+        out = runs / experiment / f'task_{task}'
+        for stop in (steps, 2 * steps):
+            if not (out / 'progress.json').is_file() or load_json(out / 'progress.json')['optimizer_step'] < stop:
+                code = _train(plan, record, attempt, experiment, start=task, n=task, epochs=plan['epochs'],
+                              splits='val', runs=runs, fsa_hf=_fsa_hf(plan), stop_after=stop)
+                if code != 75:
+                    raise RuntimeError(f'task {task} smoke did not stop at step {stop} (exit {code})')
+        sessions = load_json(out / 'run_info.json')['sessions']
+        report[f'task{task}'] = {**_speed(out), 'resume_verification': sessions[-1].get('resume_verification')}
     save_json(runs / 'smoke_report.json', report, indent=2)
     return report

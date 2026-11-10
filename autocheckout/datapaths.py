@@ -5,6 +5,8 @@ wherever ``AC_DATA`` points.
     ├── rpc/{val2019,test2019}       real RPC checkout images
     ├── eval/                        val/test labels, task_config.json (rpc_eval_official_v1)
     ├── synth_v2/                    synthetic training release, tasks 1-5 (rpc_synth_v2_v1)
+    ├── synth_v2_12x/                tasks 1-9 of the 12+13-SKU split (rpc_synth_v2_12x_v1; task 1 = synth_v2's)
+    ├── eval_12x/                    val/test labels of the 12+13-SKU split (same images and boxes as eval/)
     ├── pretrained/hf-cache/         Deformable DETR + ConvNeXt-V2 weights
     ├── models/full-syn-r1/          FULL-SYN round 1: FSA, tasks 1-5, counting policies, metrics
     └── relearn/                     relearning + active learning: meta/, variants/, active/, images/
@@ -43,6 +45,14 @@ class Layout:
     @property
     def synth(self) -> Path:
         return self.root / 'synth_v2'
+
+    @property
+    def synth_12x(self) -> Path:
+        return self.root / 'synth_v2_12x'
+
+    @property
+    def eval_12x(self) -> Path:
+        return self.root / 'eval_12x'
 
     @property
     def pretrained(self) -> Path:

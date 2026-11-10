@@ -41,14 +41,18 @@ def campaign_root(settings):
     return root / name
 
 
-def _toy_inputs(root):
-    """Six labels across five tasks, random ResNet18, no download; only for local dry runs."""
+def _toy_inputs(root, sizes=(2, 1, 1, 1, 1)):
+    """Six labels across five tasks (or the task ``sizes`` given, six labels in all), random ResNet18, no download;
+    only for local dry runs."""
     if (root / 'task_config.json').is_file():
         return
     from PIL import Image, ImageDraw
 
+    sizes = list(sizes)
+    if sum(sizes) != 6:
+        raise ValueError(f'the dry-run fixture has six labels, task sizes {sizes} add up to {sum(sizes)}')
     root.mkdir(parents=True, exist_ok=True)
-    offsets, sizes = [0, 2, 3, 4, 5], [2, 1, 1, 1, 1]
+    offsets = [sum(sizes[:i]) for i in range(len(sizes))]
     cfg = dict(name='dry-run-six-labels', seed=0, tasks=[dict(task_id=t+1, offset=o, reserved=False,
                classes=[dict(label=c, name=f'sku{c}', rpc_category_id=c+1) for c in range(o, o+n)])
                for t, (o, n) in enumerate(zip(offsets, sizes, strict=True))])

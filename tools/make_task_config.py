@@ -11,6 +11,14 @@
     python -m tools.make_task_config \\
         --categories /data/rpc/raw/retail_product_checkout/instances_test2019.json \\
         --name 100-4x25_seed0 --sizes 100,25,25,25,25 --reserved 24 --seed 0
+
+``--split-from`` splits every task >= 2 of an existing config instead (docs/design/2026-11-09-chia-12-13-sku):
+task 1 and the reserved task are kept as they are; inside each other task, ``--split`` sizes are shared among its
+supercategories (largest remainder), each supercategory (by name) is shuffled with ``random.Random(seed)`` (a new
+generator per task) and dealt in order; inside a new task, classes are ordered by RPC id; labels are contiguous.
+
+    python -m tools.make_task_config --split-from data/processed/rpc_eval_official_v1/task_config.json \\
+        --split 12,13 --name 100-8x12-13_seed0 --seed 0
 """
 
 from __future__ import annotations
@@ -71,6 +79,44 @@ def build_task_config(categories: list[dict[str, Any]], sizes: list[int], reserv
     return TaskConfig(name=name, seed=seed, tasks=tuple(tasks))
 
 
+def split_task_config(config: TaskConfig, sizes: list[int], seed: int, name: str) -> TaskConfig:
+    """Every data task >= 2 of ``config`` split into ``len(sizes)`` tasks of ``sizes`` classes (see module doc)."""
+    groups_of_task = []
+    for task in config.data_tasks:
+        if task.task_id == 1:
+            groups_of_task.append(list(task.classes))
+            continue
+        if any(c.alias_of is not None for c in task.classes):
+            raise ValueError(f'task {task.task_id} has alias classes; only plain RPC tasks can be split')
+        by_group: dict[str, list[ClassInfo]] = defaultdict(list)
+        for info in sorted(task.classes, key=lambda c: c.rpc_category_id):
+            by_group[info.supercategory].append(info)
+        shares = allocate({group: len(infos) for group, infos in by_group.items()}, sizes)
+        rng = random.Random(seed)
+        parts: list[list[ClassInfo]] = [[] for _ in sizes]
+        for group in sorted(by_group):
+            infos = list(by_group[group])
+            rng.shuffle(infos)
+            start = 0
+            for index, n in enumerate(shares[group]):
+                parts[index].extend(infos[start:start + n])
+                start += n
+        groups_of_task += parts
+    tasks, offset = [], 0
+    for task_id, infos in enumerate(groups_of_task, start=1):
+        infos = sorted(infos, key=lambda c: c.rpc_category_id)
+        classes = tuple(ClassInfo(label=offset + i, name=c.name, rpc_category_id=c.rpc_category_id,
+                                  supercategory=c.supercategory) for i, c in enumerate(infos))
+        tasks.append(Task(task_id=task_id, offset=offset, classes=classes))
+        offset += len(classes)
+    for task in config.tasks:
+        if task.reserved:
+            classes = tuple(ClassInfo(label=offset + i, name=f'reserved_{offset + i}') for i in range(task.num_classes))
+            tasks.append(Task(task_id=len(tasks) + 1, offset=offset, classes=classes, reserved=True))
+            offset += task.num_classes
+    return TaskConfig(name=name, seed=seed, tasks=tuple(tasks))
+
+
 def distribution_table(config: TaskConfig) -> str:
     """Tasks x supercategory counts as a plain-text table."""
     data_tasks = config.data_tasks
@@ -86,7 +132,9 @@ def distribution_table(config: TaskConfig) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--categories", type=Path, required=True, help="COCO JSON with the SKU categories")
+    parser.add_argument("--categories", type=Path, help="COCO JSON with the SKU categories")
+    parser.add_argument("--split-from", type=Path, help="existing task config whose tasks >= 2 are split")
+    parser.add_argument("--split", default="12,13", help="with --split-from: sizes each task >= 2 is split into")
     parser.add_argument("--name", required=True, help="config name, e.g. 100-4x25_seed0")
     parser.add_argument("--sizes", default="100,25,25,25,25", help="number of SKUs per data task")
     parser.add_argument("--reserved", type=int, default=24, help="reserved slots in a last task")
@@ -94,13 +142,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--out", type=Path, help="default: configs/tasks_<name>.json")
     args = parser.parse_args(argv)
 
-    categories = load_json(args.categories)["categories"]
-    sizes = [int(size) for size in args.sizes.split(",")]
-    config = build_task_config(categories, sizes, args.reserved, args.seed, args.name)
+    if (args.categories is None) == (args.split_from is None):
+        parser.error("give exactly one of --categories and --split-from")
+    if args.split_from:
+        split = [int(size) for size in args.split.split(",")]
+        config = split_task_config(TaskConfig.load(args.split_from), split, args.seed, args.name)
+    else:
+        categories = load_json(args.categories)["categories"]
+        sizes = [int(size) for size in args.sizes.split(",")]
+        config = build_task_config(categories, sizes, args.reserved, args.seed, args.name)
     out = args.out or Path("configs") / f"tasks_{args.name}.json"
     config.save(out)
     print(distribution_table(config))
-    print(f"{config.num_slots} slots ({args.reserved} reserved), {config.num_classes} classifier outputs; "
+    reserved = sum(t.num_classes for t in config.tasks if t.reserved)
+    print(f"{config.num_slots} slots ({reserved} reserved), {config.num_classes} classifier outputs; "
           f"wrote {out}")
 
 

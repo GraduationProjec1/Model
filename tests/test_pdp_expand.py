@@ -130,3 +130,121 @@ def test_expansion_refuses_a_checkpoint_or_config_that_does_not_match(toy, break
         cfg_b = TaskConfig.from_dict(data)
     with pytest.raises(ValueError, match=message):
         expand_checkpoint(old, cfg_a, cfg_b, learned=LEARNED)
+
+
+# --- repartition: same slots, other task boundaries after the learned classes (chia 12+13 SKU) ---------------------
+@pytest.fixture(scope="module")
+def split(tmp_path_factory):
+    """Task 1 of config A (2 + 2 classes, 1 reserved) and its repartition to B (2 + 1 + 1, 1 reserved)."""
+    from expand import repartition_checkpoint
+
+    monkeypatch = pytest.MonkeyPatch()
+    use_tiny_detr(monkeypatch)
+    tmp = tmp_path_factory.mktemp("repartition")
+    (tmp / "a").mkdir()
+    (tmp / "b").mkdir()
+    cfg_a = TaskConfig.from_dict(task_config_dict(sizes=(2, 2), reserved=1, name="toy-2x2"))
+    cfg_b = TaskConfig.from_dict(task_config_dict(sizes=(2, 1, 1), reserved=1, name="toy-2+1+1"))
+    args_a, args_b = pdp_args(tmp / "a", config=cfg_a), pdp_args(tmp / "b", config=cfg_b)
+    trainer_a = make_trainer(args_a, task_id=1)
+    trainer_a.model.model.prompts.init_task_prompts()
+    trainer_a.class_query_cache[0] = [torch.ones(256)]
+    trainer_a.class_prototypes[0] = torch.ones(256)
+    trainer_a.class_cache_count[0] = 1
+    path_a = str(tmp / "a" / "task_final.pth")
+    trainer_a.save_task_final(path_a)
+    old = torch.load(path_a, map_location="cpu")
+    new = repartition_checkpoint(old, cfg_a, cfg_b, learned=2)
+    path_b = str(tmp / "b" / "task_1.pth")
+    torch.save(new, path_b)
+    yield SimpleNamespace(cfg_a=cfg_a, cfg_b=cfg_b, args_a=args_a, args_b=args_b, trainer_a=trainer_a, old=old,
+                          new=new, path_b=path_b)
+    monkeypatch.undo()
+
+
+def test_repartition_changes_only_the_task_boundaries(split):
+    old, new = split.old, split.new
+    assert new["runtime"]["model_config"]["task_num_classes"] == [2, 1, 1, 1]
+    assert old["runtime"]["model_config"]["task_num_classes"] == [2, 2, 1]  # the input is not changed
+    assert set(new["model"]) == set(old["model"])
+    assert all(torch.equal(new["model"][k], old["model"][k]) for k in old["model"])
+    for name in ("class_query_cache", "class_prototypes", "class_cache_count"):
+        assert new[name] is old[name]
+    assert new["task_id"] == old["task_id"]
+    assert new["repartitioned_from"]["old_task_num_classes"] == [2, 2, 1]
+    runtime.validate_runtime(split.args_b, new["runtime"])
+    with pytest.raises(ValueError, match="task_num_classes"):
+        runtime.validate_runtime(split.args_a, new["runtime"])
+    with pytest.raises(ValueError, match="task_num_classes"):
+        runtime.validate_runtime(split.args_b, old["runtime"])  # the unrepartitioned checkpoint is refused
+
+
+def test_repartitioned_model_predicts_task_1_exactly_as_before(split):
+    trainer_b = make_trainer(split.args_b, task_id=1)
+    trainer_b.resume(split.path_b)
+    batch = make_batch([[0], [1, 0]])
+    outputs = []
+    for model in (split.trainer_a.model, trainer_b.model):
+        model.eval()
+        model.model.prompts.set_task_id(0)
+        with torch.no_grad():
+            outputs.append(two_pass(model, batch))
+    a, b = outputs
+    assert torch.equal(b.logits, a.logits) and torch.equal(b.pred_boxes, a.pred_boxes)
+
+
+def test_task_2_of_the_new_config_trains_from_the_repartitioned_task_1(split):
+    trainer = make_trainer(split.args_b, task_id=2)
+    trainer.resume(split.path_b)
+    trainer.set_teacher()
+    trainer.model.model.prompts.init_task_prompts()
+    trainer.train()
+    loss, _ = trainer.common_step(make_batch([[2], [2, 0]]), 0)
+    assert torch.isfinite(loss)
+    loss.backward()
+    grad = trainer.model.model.prompts.private_p_0.grad
+    assert grad[:2].abs().sum() == 0 and grad[2].abs().sum() > 0 and grad[3:].abs().sum() == 0
+
+
+@pytest.mark.parametrize("break_it, message", [
+    ("changed_learned_class", "differs"), ("other_slots", "slots"), ("not_a_boundary", "does not start"),
+    ("trained_later_slot", "not zero"), ("later_prototype", "prototype memory"), ("wrong_old_config", "is not"),
+])
+def test_repartition_refuses_what_it_cannot_keep_exactly(split, break_it, message):
+    from expand import repartition_checkpoint
+
+    old, cfg_a, cfg_b, learned = dict(split.old), split.cfg_a, split.cfg_b, 2
+    if break_it == "changed_learned_class":
+        data = cfg_b.to_dict()
+        data["tasks"][0]["classes"][1]["name"] = "sku_x"
+        cfg_b = TaskConfig.from_dict(data)
+    elif break_it == "other_slots":
+        cfg_b = TaskConfig.from_dict(task_config_dict(sizes=(2, 1, 1), reserved=2))
+    elif break_it == "not_a_boundary":
+        learned = 1
+        cfg_b = cfg_a
+    elif break_it == "trained_later_slot":
+        old["model"] = dict(old["model"])
+        old["model"]["model.prompts.private_k_0"] = old["model"]["model.prompts.private_k_0"].clone()
+        old["model"]["model.prompts.private_k_0"][2] = 1.0
+    elif break_it == "later_prototype":
+        old["class_cache_count"] = {**old["class_cache_count"], 3: 1}
+    else:
+        cfg_a = TaskConfig.from_dict(task_config_dict(sizes=(2, 1, 1), reserved=1))
+    with pytest.raises(ValueError, match=message):
+        repartition_checkpoint(old, cfg_a, cfg_b, learned=learned)
+
+
+def test_cli_repartition_writes_the_checkpoint(split, tmp_path):
+    from expand import main
+
+    paths = {}
+    for name, cfg in (("a", split.cfg_a), ("b", split.cfg_b)):
+        paths[name] = tmp_path / f"{name}.json"
+        cfg.save(paths[name])
+    torch.save(split.old, tmp_path / "in.pth")
+    main(["--repartition", "--checkpoint", str(tmp_path / "in.pth"), "--old-config", str(paths["a"]),
+          "--new-config", str(paths["b"]), "--learned", "2", "--out", str(tmp_path / "out.pth")])
+    out = torch.load(tmp_path / "out.pth", map_location="cpu")
+    assert out["runtime"]["model_config"]["task_num_classes"] == [2, 1, 1, 1]
+    assert all(torch.equal(out["model"][k], split.old["model"][k]) for k in split.old["model"])

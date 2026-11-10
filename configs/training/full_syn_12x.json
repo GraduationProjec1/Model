@@ -1,0 +1,18 @@
+{
+  "campaign_id": "full-syn-12x",
+  "round": 1,
+  "artifact_root": "data/training",
+  "dry_run": false,
+  "resolution": 640,
+  "batch_size": 8,
+  "effective_batch": 8,
+  "fsa_batch_size": 4,
+  "num_workers": 8,
+  "tf32": true,
+  "fsa_epochs": 8,
+  "epochs": 16,
+  "checkpoint_every_minutes": 2,
+  "audit_images": 1000,
+  "pdp_experiment": "EXP-FULL-SYN",
+  "_paths": "filled by tools/run_split.py from the data folder (autocheckout/datapaths.py): synth_v2_12x, eval_12x, rpc, pretrained, models/full-syn-r1 (seed) and eval/task_config.json (the seed's task config)"
+}
