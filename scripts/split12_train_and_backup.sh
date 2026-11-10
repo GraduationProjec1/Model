@@ -41,6 +41,19 @@ LOG_DIR="$REPO/data/training/split12_logs/$RUN_ID"; mkdir -p "$LOG_DIR" "$CAMPAI
 MAIN_LOG="$LOG_DIR/master_execution.log"
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$MAIN_LOG"; }
 
+# Python của PDP: venv-pdp (Python 3.10 + requirements-lock-cu121), không phải Python hệ thống của máy GPU.
+VENV="${VENV:-/workspace/venv-pdp}"
+if [[ -z "${VIRTUAL_ENV:-}" && -f "$VENV/bin/activate" ]]; then
+    # shellcheck source=/dev/null
+    source "$VENV/bin/activate"
+fi
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}" TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9}"
+if ! python -c "import sys, torch, pytorch_lightning, transformers, pycocotools; assert sys.version_info[:2] == (3, 10)" 2>/dev/null; then
+    echo "Python không đúng môi trường: $(command -v python) ($(python --version 2>&1))."
+    echo "Cần venv Python 3.10 có torch, pytorch_lightning, transformers, pycocotools (mục 5 hướng dẫn):"
+    echo "  source /workspace/venv-pdp/bin/activate   (chưa có thì tạo theo mục 5)"
+    exit 3
+fi
 command -v rclone >/dev/null || { echo "THIẾU rclone: cài và cấu hình trước (bước 4 hướng dẫn). Không chạy khi chưa có backup."; exit 3; }
 rclone lsd "$RCLONE_REMOTE" >/dev/null 2>&1 || rclone mkdir "$RCLONE_REMOTE" || { echo "Không ghi được $RCLONE_REMOTE"; exit 3; }
 
