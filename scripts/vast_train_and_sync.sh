@@ -261,7 +261,8 @@ case "$TASK" in
         done
         # weights_md5.txt (logs/ của đợt al_r3, đường dẫn ./relearn-fix-v2/...): gói r4 đặt cạnh campaign
         WMD5="${WEIGHTS_MD5:-$CAMP/../weights_md5.txt}"
-        if [[ -f "$WMD5" ]]; then
+        if [[ "${SKIP_MD5:-0}" != "1" ]]; then
+            [[ -f "$WMD5" ]] || { echo "[THIẾU] $WMD5 (install_r4.sh bước 3; SKIP_MD5=1 để bỏ qua có chủ ý)" | tee -a "$MAIN_LOG"; exit 3; }
             (cd "$CAMP/.." && md5sum -c --quiet --ignore-missing "$WMD5") || { echo "[THIẾU] md5 weights lệch $WMD5" | tee -a "$MAIN_LOG"; exit 3; }
         fi
         echo ">> B0: test2019 cho r3_real và r3_all (chấm một lần, ~1 giờ)..." | tee -a "$MAIN_LOG"

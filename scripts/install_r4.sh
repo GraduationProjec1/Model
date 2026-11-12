@@ -49,6 +49,7 @@ done
 
 echo "== 3. md5 weights (logs/weights_md5.txt của đợt al_r3)"
 rclone copy "$SRC/logs" "$CAMP/.." --include "weights_md5.txt"
+grep -q "EXP-FB-FT-al_margin_k_B500_r3_real/task_5/task_final.pth" "$CAMP/../weights_md5.txt" || fail "weights_md5.txt không có dòng r3_real (định dạng đường dẫn khác?)"
 (cd "$CAMP/.." && md5sum -c --quiet --ignore-missing weights_md5.txt) || fail "md5 weights lệch"
 echo "   md5 khớp cho: $(cd "$CAMP/.." && md5sum -c --ignore-missing weights_md5.txt 2>/dev/null | grep -c ': OK') file"
 

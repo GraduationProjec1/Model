@@ -264,9 +264,19 @@ def test_round4_selects_from_the_round3_model_and_names_the_variant_r4(release, 
     assert only['variant'] == 'al_m_r4' and only['selection'] == 'm_r3' and only['new_images'] == 1
     # a shipped selection is reused (same predictions), never selected again; other predictions are refused
     before = (release / 'relearn/active/selections/m_r3.json').read_text()
-    again = al_round2.round2(release, campaign, 'al_m_r3_real', budget=2, build=lambda d, s, **kw: {'variant': 'x'})
+    again = al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=lambda d, s, **kw: {'variant': 'x'})
     assert again == {'variant': 'x'} and (release / 'relearn/active/selections/m_r3.json').read_text() == before
-    _w(release / 'relearn/active/selections/m_r3.json', {**load_json(release / 'relearn/active/selections/m_r3.json'),
-                                                         'pred_md5': 'other'})
+    shipped = load_json(release / 'relearn/active/selections/m_r3.json')
+    with pytest.raises(ValueError, match='--budget asks 2'):  # budget of the call differs from the shipped file
+        al_round2.round2(release, campaign, 'al_m_r3_real', budget=2, build=None)
+    _w(release / 'relearn/active/selections/m_r2.json',  # the round-2 selection changed under the shipped file
+       {**load_json(release / 'relearn/active/selections/m_r2.json'), 'image_ids': [2, 5]})
+    with pytest.raises(ValueError, match='does not continue'):
+        al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
+    _w(release / 'relearn/active/selections/m_r2.json',
+       {**load_json(release / 'relearn/active/selections/m_r2.json'), 'image_ids': [2, 3]})
+    _w(release / 'relearn/active/selections/m_r3.json', {**shipped, 'pred_md5': 'other'})
     with pytest.raises(ValueError, match='other predictions'):
         al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
+    with pytest.raises(ValueError):  # a seed repeat is not a round-4 start either
+        al_round2._rounds('al_m_r3_real_s1')

@@ -67,7 +67,7 @@ fi
 r3_build() {
     local v=$1 tag=${1##*_r3_} sel=${1#al_}
     sel=${sel%_r3_*}_r2
-    tag=$(python -c "from autocheckout.update_model import r3_data_tag; print(r3_data_tag('$v'))")  # _s<N>: dữ liệu của tag gốc
+    tag=${tag%_s[0-9]*}   # _s<N> (lặp seed, SEED_TAGS của update_model): dữ liệu của tag gốc
     [[ $tag == freeze ]] && { tag=${R3_FREEZE_DATA:?"_r3_freeze: đặt R3_FREEZE_DATA=rows|train|real|all|prompt"}; }
     [[ -f $REL/active/selections/$sel.json ]] || { echo "$v: thiếu tập chọn $sel (chạy vòng 2 trước)" >&2; return 1; }
     local opts

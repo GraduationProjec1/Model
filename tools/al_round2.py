@@ -58,11 +58,21 @@ def round2(data_root: Path | None, campaign: Path, first: str, budget: int | Non
         raise FileNotFoundError(f'{pred}: train {first} first')
     labelled = list(chosen['image_ids'])
     written = release / f'active/selections/{target}.json'
-    if written.is_file():  # shipped from the machine that selected (--select-only): kept if from the same predictions
+    if written.is_file():  # shipped from the machine that selected (--select-only): kept only if nothing changed
         done = load_json(written)
-        if done.get('pred_md5') != md5_file(pred) or done.get('opts', {}).get('from') != first:
-            raise ValueError(f'{written}: selected from other predictions than {pred}; delete it to select again')
-        new = list(done['new_image_ids'])
+        opts = done.get('opts', {})
+        new = list(done.get('new_image_ids', []))
+        stale = []
+        if done.get('pred_md5') != md5_file(pred) or opts.get('from') != first:
+            stale.append(f'selected from other predictions than {pred}')
+        if done.get('image_ids') != labelled + new or done.get('strategy') != chosen['strategy'] or \
+                done.get('pool_md5') != chosen['pool_md5']:
+            stale.append(f'does not continue the current {name}')
+        if budget is not None and opts.get('round_budget') != budget:
+            stale.append(f"holds {opts.get('round_budget')} new images, --budget asks {budget}")
+        if stale:
+            raise ValueError(f'{written}: ' + '; '.join(stale) + '; delete it to select again')
+        print(f'{written.name}: reused ({len(new)} new images selected on {done.get("created_at")})')
     else:
         split = load_json(release / 'active/splits/val_a_split.json')
         remaining = sorted(set(split['pool']) - set(labelled))
