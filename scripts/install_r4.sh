@@ -27,7 +27,10 @@ command -v rclone >/dev/null || fail "thiếu rclone"
 
 echo "== 1. Code nhánh $BRANCH"
 git -C "$REPO" fetch -q origin "$BRANCH"
-git -C "$REPO" checkout -q -B "$BRANCH" "origin/$BRANCH"   # ghi đè bản 1d40e74 của gói r3; data/ không bị đụng (gitignore)
+# install.sh của gói r3 giải nén tar code 1d40e74 đè lên bản clone (không có .git trong tar): file theo dõi bị sửa,
+# nên phải reset --hard về nhánh mới; data/ (gitignore) và file lạ không bị đụng.
+git -C "$REPO" checkout -q -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
+git -C "$REPO" reset -q --hard "origin/$BRANCH"
 echo "   HEAD: $(git -C "$REPO" rev-parse --short HEAD)  $(git -C "$REPO" log -1 --format=%s)"
 grep -q "al_r4)" "$REPO/scripts/vast_train_and_sync.sh" || fail "code chưa có case al_r4 (sai nhánh?)"
 
