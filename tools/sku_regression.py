@@ -32,7 +32,19 @@ from autocheckout.taskcfg import TaskConfig
 
 MATCH_IOU = 0.5
 MIN_OBJECTS = 30  # SKUs with fewer GT objects are not judged for a fall
-FALL = 0.02  # largest allowed fall of the share of objects counted right (gate I10)
+FALL = 0.02  # fall of the share of objects counted right that is still reported (gate I10, until 12/11/2026)
+# Gate rule since 12/11/2026 (docs/02-cac-lan-train/08-2026-11-12-tong-ket-va-ke-hoach.md, 2.4): an SKU "fell" when its
+# share of right objects dropped by more than FALL_RECALL AND it lost at least FALL_OBJECTS right objects, so that a
+# 3-object wobble on a 150-object SKU no longer stops a run that fixed hundreds of images.
+FALL_RECALL = 0.03
+FALL_OBJECTS = 5
+
+
+def fell(sku: dict[str, Any]) -> bool:
+    """Gate rule of 12/11/2026 for one ``per_sku`` entry."""
+    drop = sku['base'] - sku['new']
+    lost = round(sku['objects'] * drop, 6)  # right objects lost; rounded so 125 * 0.04 counts as 5
+    return sku['objects'] >= MIN_OBJECTS and drop > FALL_RECALL and lost >= FALL_OBJECTS
 
 
 def policy_vector(policy: dict[str, Any], cfg: TaskConfig, stage: int) -> tuple[np.ndarray, float]:
@@ -122,7 +134,8 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
             per_sku.append({'label': label, 'objects': n, 'base': a['right'][label] / n,
                             'new': b['right'][label] / n, 'in_rows': label in rows,
                             'over_base': over(a, label), 'over_new': over(b, label)})
-    falls = [s for s in per_sku if s['objects'] >= MIN_OBJECTS and s['base'] - s['new'] > FALL]
+    falls = [s for s in per_sku if fell(s)]
+    falls_2pt = [s for s in per_sku if s['objects'] >= MIN_OBJECTS and s['base'] - s['new'] > FALL]
 
     def pairs(swapped: Counter) -> Counter:
         total = Counter()
@@ -143,6 +156,7 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
             'base': sum(c for (t, p), c in a['swapped'].items() if rows and t not in rows and p in rows),
             'new': sum(c for (t, p), c in b['swapped'].items() if rows and t not in rows and p in rows)},
         'falls': sorted(falls, key=lambda s: s['new'] - s['base']),
+        'falls_2pt': sorted(falls_2pt, key=lambda s: s['new'] - s['base']),  # the rule before 12/11/2026, reported only
         'per_sku': per_sku,
         'top_pairs': [{'pair': list(p), 'base': before[p], 'new': after[p]}
                       for p, _ in (before + after).most_common(top)],

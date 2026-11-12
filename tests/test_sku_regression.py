@@ -50,6 +50,21 @@ def test_fixed_broken_pairs_and_falls():
     assert report['top_pairs'][0]['pair'] in ([0, 1], [1, 2])
 
 
+def test_fell_needs_both_a_recall_drop_and_lost_objects():
+    """Gate rule of 12/11/2026: recall -0.03 AND >= 5 right objects lost; SKUs under 30 objects never fall."""
+    def sku(objects, base, new):
+        return {'label': 0, 'objects': objects, 'base': base, 'new': new}
+    assert sr.fell(sku(150, 0.95, 0.90))                 # -0.05, 7.5 objects
+    assert not sr.fell(sku(150, 0.95, 0.925))            # -0.025: a 2-point wobble (the old rule stopped here)
+    assert not sr.fell(sku(100, 0.95, 0.91))             # -0.04 but only 4 objects
+    assert sr.fell(sku(125, 0.95, 0.91))                 # -0.04, 5 objects
+    assert not sr.fell(sku(29, 1.0, 0.0))                # too few objects to judge
+    # compare() reports both lists: the gate's ``falls`` and the old 2-point ``falls_2pt``
+    report = sr.compare(VAL, preds([(1, 0, 0), (1, 1, 20), (2, 1, 0), (3, 2, 0)]),
+                        preds([(1, 0, 0), (1, 1, 20), (2, 1, 0)]), labels=range(3))
+    assert report['falls'] == [] and report['falls_2pt'] == []  # every SKU here has < 30 objects
+
+
 def test_a_missed_object_and_an_extra_box_make_the_image_wrong():
     report = sr.compare(VAL, preds([(1, 0, 0), (1, 1, 20), (2, 1, 0), (3, 2, 0)]),
                         preds([(1, 0, 0), (2, 1, 0), (2, 1, 50), (3, 2, 0)]), labels=range(3))

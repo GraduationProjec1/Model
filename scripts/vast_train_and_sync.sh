@@ -32,6 +32,8 @@ INSTANCE_ID="${INSTANCE_ID:-}"
 #   - "al_dot2": Active Learning đợt 2 (B=250, 850 + entropy)
 #   - "al_next": vòng 2 từ margin_k (+ random_s0 so sánh) rồi đợt 2; cần khôi phục campaign dot1 từ Drive trước
 #   - "al_r3": vòng 3 (5 run từ model al_margin_k_B500_r2); cần gpu_bundle_r3/install.sh chạy trước (campaign + gói r3)
+#   - "al_r4": đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): B0 test2019 cho r3_real + r3_all, B4 seed
+#              (_r3_real_s1), B1 vòng 4 (_r4), B3 freeze (R4_FREEZE=1); cần campaign có r2, r3_real, r3_all
 #   - "relearn_pilot": Chạy học lại pilot (17 SKU)
 #   - "relearn_e1": Chạy học lại E1 (63 SKU)
 #   - "naive": Chạy fine-tune thẳng (baseline B2)
@@ -240,6 +242,36 @@ case "$TASK" in
         done
         echo ">> Vòng 3: rows, train, real, all, prompt (~10 giờ 4090)..." | tee -a "$MAIN_LOG"
         bash scripts/run_al.sh "${R3_RUNS[@]}" 2>&1 | tee -a "$MAIN_LOG"
+        ;;
+    al_r4)
+        # Đợt GPU 1 sau vòng 3: B0 -> B4 -> B1 -> (B3). Mỗi bước bỏ qua nếu đã có stage; thiếu đầu vào thì dừng trước khi tốn GPU.
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        SEL="$DATA_DIR/relearn/active/selections"
+        NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$SEL/margin_k_B500_r2.json" "$SEL/margin_k_B500_r3.json"
+              "$DATA_DIR/relearn/active/splits/val_a_split.json" "$DATA_DIR/relearn/variants/e1/train_task_5_fix.json"
+              "$DATA_DIR/relearn/variants/al_margin_k_B500_r3_real/train_task_5_fix.json"
+              "$DATA_DIR/relearn/variants/al_margin_k_B500_r3_real/train_rows.json")
+        for v in al_margin_k_B500_r2 al_margin_k_B500_r3_real al_margin_k_B500_r3_all; do
+            NEED+=("$CAMP/stages/$v.json" "$CAMP/runs/EXP-FB-FT-$v/task_5/task_final.pth"
+                   "$CAMP/runs/EXP-FB-FT-$v/task_5/pred_val.npz" "$CAMP/scored/$v/calibration_count_m2.json"
+                   "$CAMP/scored/$v/calibration_count_groups.json")
+        done
+        for f in "${NEED[@]}"; do
+            [[ -f "$f" ]] || { echo "[THIẾU] $f -> chạy gpu_bundle_r4/install.sh trước" | tee -a "$MAIN_LOG"; exit 3; }
+        done
+        # weights_md5.txt (logs/ của đợt al_r3, đường dẫn ./relearn-fix-v2/...): gói r4 đặt cạnh campaign
+        WMD5="${WEIGHTS_MD5:-$CAMP/../weights_md5.txt}"
+        if [[ -f "$WMD5" ]]; then
+            (cd "$CAMP/.." && md5sum -c --quiet --ignore-missing "$WMD5") || { echo "[THIẾU] md5 weights lệch $WMD5" | tee -a "$MAIN_LOG"; exit 3; }
+        fi
+        echo ">> B0: test2019 cho r3_real và r3_all (chấm một lần, ~1 giờ)..." | tee -a "$MAIN_LOG"
+        bash scripts/run_al.sh test al_margin_k_B500_r3_real al_margin_k_B500_r3_all --confirm-test 2>&1 | tee -a "$MAIN_LOG"
+        echo ">> B4: al_margin_k_B500_r3_real_s1 (seed 1, ~2,7 giờ) rồi B1: al_margin_k_B500_r4 (~3 giờ)..." | tee -a "$MAIN_LOG"
+        bash scripts/run_al.sh al_margin_k_B500_r3_real_s1 al_margin_k_B500_r4 2>&1 | tee -a "$MAIN_LOG"
+        if [[ "${R4_FREEZE:-0}" == "1" ]]; then
+            echo ">> B3: al_margin_k_B500_r3_freeze (lr_old 0, dữ liệu của real, ~2,7 giờ)..." | tee -a "$MAIN_LOG"
+            R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze 2>&1 | tee -a "$MAIN_LOG"
+        fi
         ;;
     al_dot2)
         echo ">> Chạy Active Learning đợt 2 (B=250, 850 + entropy)..." | tee -a "$MAIN_LOG"

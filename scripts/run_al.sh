@@ -8,6 +8,9 @@
 #   bash scripts/run_al.sh al_margin_k_B500_r3_rows al_margin_k_B500_r3_train   # vòng 3 (docs/design/2026-11-07-vong-3):
 #       tag rows|train|real|all|prompt|freeze; gói dựng từ tập chọn margin_k_B500_r2 + base e1; freeze cần
 #       R3_FREEZE_DATA=<tag của run tốt nhất> (dữ liệu của run đó, chỉ đổi lr_old = 0)
+#   bash scripts/run_al.sh al_margin_k_B500_r3_real_s1   # B4: lặp r3_real với seed train 1 (dữ liệu của real)
+#   bash scripts/run_al.sh al_margin_k_B500_r4            # B1: vòng 4 từ model r3_real (docs/design/2026-11-12-dot-gpu-1);
+#       tập chọn margin_k_B500_r3 (al_round2 --from ..._r3_real) dựng sẵn hoặc tự tạo; R4_BUDGET (mặc định 500)
 #   bash scripts/run_al.sh dot1 --dry-run       # chỉ dựng dữ liệu (CPU), không train
 #   bash scripts/run_al.sh test al_margin_k_B500 al_random_B500_s0 --confirm-test   # test2019, MỘT lần mỗi run
 #
@@ -64,6 +67,7 @@ fi
 r3_build() {
     local v=$1 tag=${1##*_r3_} sel=${1#al_}
     sel=${sel%_r3_*}_r2
+    tag=$(python -c "from autocheckout.update_model import r3_data_tag; print(r3_data_tag('$v'))")  # _s<N>: dữ liệu của tag gốc
     [[ $tag == freeze ]] && { tag=${R3_FREEZE_DATA:?"_r3_freeze: đặt R3_FREEZE_DATA=rows|train|real|all|prompt"}; }
     [[ -f $REL/active/selections/$sel.json ]] || { echo "$v: thiếu tập chọn $sel (chạy vòng 2 trước)" >&2; return 1; }
     local opts
@@ -82,6 +86,10 @@ for v in "${VARIANTS[@]}"; do
     if [[ ! -f $REL/variants/$v/train_task_5_fix.json ]]; then
         if [[ $v == *_r3_* ]]; then
             r3_build "$v"
+        elif [[ $v == *_r4 ]]; then
+            # vòng 4: từ model _r3_real; tập chọn <sel>_r3 có sẵn (chọn trên Mac, --select-only) thì chỉ dựng gói
+            python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r4}_r3_real" --budget "${R4_BUDGET:-500}" \
+                2>&1 | tee -a "$LOG"
         elif [[ $v == *_r2 ]]; then
             python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r2}" 2>&1 | tee -a "$LOG"
         else

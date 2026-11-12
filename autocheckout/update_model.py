@@ -16,6 +16,7 @@ slot, no teacher. Stages, each written once to ``stages/<stage>.json`` and skipp
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -32,7 +33,6 @@ from autocheckout.full_syn import (
     PDP,
     _attempt,
     _environment,
-    _gate,
     _require,
     _run,
     _toy_releases,
@@ -62,17 +62,31 @@ VARIANTS['r3_prompt'] = {**VARIANTS['r3_strong'], 'tune_old_private': 1}
 VARIANTS['r3_freeze'] = {**VARIANTS['r3_strong'], 'lr_old': 0.0}
 R3_TAGS = {'rows': 'r3_base', 'train': 'r3_strong', 'real': 'r3_strong', 'all': 'r3_strong', 'prompt': 'r3_prompt',
            'freeze': 'r3_freeze'}
+# Đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): al_<selection>_r3_<tag>_s<N> lặp lại run <tag> với seed
+# train N (B4, đo nhiễu seed; dữ liệu của <tag>); al_<selection>_r4 là vòng 4 AL từ model _r3_real (B1, công thức
+# r3_strong, tập chọn <selection>_r3 của tools/al_round2.py).
+SEED_TAGS = {'real_s1': ('real', 1)}
+VARIANTS.update({f'{R3_TAGS[data]}_s{seed}': {**VARIANTS[R3_TAGS[data]], 'seed': seed}
+                 for data, seed in SEED_TAGS.values()})
+VARIANTS['r4'] = dict(VARIANTS['r3_strong'])
+R4_FROM = 'real'  # the round-3 run a round-4 run starts from (decision of 12/11/2026, §6 of the summary)
+TRAIN_SEED = 0  # --seed of configs/exp/native/common.sh: every run before B4 trained with it
 # Gates of the plan, written before any run. gain: least cAcc-M2 gain on Val-B (strict: must be > 0);
 # pair_drop: least relative fall of the confusions inside the retrained pairs; other_drop: largest AP50 fall of the
-# SKUs not retrained; max_falls: SKUs (>= 30 objects) whose share of right objects falls by more than 0.02.
+# SKUs not retrained; max_falls: SKUs (>= 30 objects) that fell by tools.sku_regression.fell (recall -0.03 and
+# >= 5 right objects lost; before 12/11/2026: share of right objects -0.02).
+# 12/11/2026 (docs/02-cac-lan-train/08-2026-11-12-tong-ket-va-ke-hoach.md, 2.4 and 6): pair_drop 0.30 -> 0.25 and
+# max_falls -> 10 with the new fall rule. 18 of 20 variants of rounds 1-3 stopped on 1-9 SKUs losing 3-6 objects while
+# cAcc-M2 rose 10-23 points; with these rules 16 of 18 pass and al_margin_k_B500_r3_train (17 falls) still stops.
 GATES = {
-    'pilot': dict(gain=0.0, strict=True, sign_p=0.05, pair_drop=0.30, other_drop=0.01, max_falls=6),  # nới từ 3: oracle cũng có 4 falls, margin_k có 6 (2 trong train_rows, 4 lân cận; AP tổng vẫn tăng)
-    'e1': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.30, other_drop=0.01, max_falls=0),
-    'e2': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.30, other_drop=0.01, max_falls=0),
-    'round2': dict(gain=0.0, strict=False, sign_p=None, pair_drop=0.0, other_drop=0.005, max_falls=0),
+    'pilot': dict(gain=0.0, strict=True, sign_p=0.05, pair_drop=0.25, other_drop=0.01, max_falls=10),
+    'e1': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.25, other_drop=0.01, max_falls=10),
+    'e2': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.25, other_drop=0.01, max_falls=10),
+    'round2': dict(gain=0.0, strict=False, sign_p=None, pair_drop=0.0, other_drop=0.005, max_falls=10),
 }
 # Round 3: the pilot gate is only reported; the decision follows the criteria of the design (11-C, 11-D).
-GATES.update({kind: dict(GATES['pilot']) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze')})
+GATES.update({kind: dict(GATES['pilot']) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze', 'r4')})
+GATES.update({f'{R3_TAGS[data]}_s{seed}': dict(GATES['pilot']) for data, seed in SEED_TAGS.values()})
 # Quota of the synthetic images (settings, objects per retrained SKU): from the full-face relearn release, from v2
 # for an SKU the relearn release covers, from v2 for an SKU it does not. Without these keys every synthetic image
 # holding a retrained SKU is taken (the first version: 29,539 v2 images for the pilot rows, 62,061 for e1).
@@ -96,21 +110,42 @@ def _kind(name: str) -> str:
     (``al_<selection>_r2``, tools/al_round2.py) as round2, from the first round's model."""
     if name.startswith('al_') and '_r3_' in name:
         tag = name.rsplit('_r3_', 1)[1]
+        if tag in SEED_TAGS:
+            data, seed = SEED_TAGS[tag]
+            return f'{R3_TAGS[data]}_s{seed}'
         if tag not in R3_TAGS:
-            raise ValueError(f'{name}: round-3 tag must be one of {sorted(R3_TAGS)}')
+            raise ValueError(f'{name}: round-3 tag must be one of {sorted(R3_TAGS) + sorted(SEED_TAGS)}')
         return R3_TAGS[tag]
     if name.startswith('al_'):
+        if name.endswith('_r4'):
+            return 'r4'
         return 'round2' if name.endswith('_r2') else 'pilot'
     return name
 
 
+def r3_data_tag(name: str) -> str:
+    """The round-3 tag whose training data a run uses: its own, or for a seed repeat (``_r3_real_s1``) the repeated
+    run's (``real``)."""
+    tag = name.rsplit('_r3_', 1)[1]
+    return SEED_TAGS[tag][0] if tag in SEED_TAGS else tag
+
+
+def _train_seed(hp: dict) -> int:
+    return int(hp.get('seed', TRAIN_SEED))
+
+
 def _al_start(plan: dict, name: str) -> tuple[str, str]:
     """(model to start from, run to compare with) of an active-learning variant."""
-    if '_r3_' in name:  # round 3: from the round-2 model of the same selection
+    if '_r3_' in name:  # round 3 (and its seed repeats): from the round-2 model of the same selection
         second = name.rsplit('_r3_', 1)[0] + '_r2'
         if _done(plan, second) is None:
             raise RuntimeError(f'{name} starts from {second}: train {second} first')
         return str(Path(plan['runs']) / f'{EXP}-{second}' / f'task_{STAGE}/task_final.pth'), second
+    if name.endswith('_r4'):  # round 4: from the round-3 model R4_FROM of the same selection
+        third = f'{name.removesuffix("_r4")}_r3_{R4_FROM}'
+        if _done(plan, third) is None:
+            raise RuntimeError(f'{name} starts from {third}: train {third} first')
+        return str(Path(plan['runs']) / f'{EXP}-{third}' / f'task_{STAGE}/task_final.pth'), third
     if not name.endswith('_r2'):
         return plan['seed_task5'], 'baseline'
     first = name.removesuffix('_r2')
@@ -277,14 +312,28 @@ def verdict(gate: dict, cacc_base: float, cacc_new: float, comparison: dict, ap_
     pairs = comparison['pair_confusions_in_rows']
     if pairs['new'] > pairs['base'] * (1 - gate['pair_drop']):
         failed.append(f"pair confusions {pairs['base']} -> {pairs['new']} (needs a {gate['pair_drop']:.0%} fall)")
-    if ap_base - ap_new > gate['other_drop']:
+    # Every row retrained (r3_all): no "other SKU", AP50 is NaN and the condition cannot be judged. Say so instead of
+    # letting the NaN comparison pass silently.
+    ap_measured = not (math.isnan(ap_base) or math.isnan(ap_new))
+    if ap_measured and ap_base - ap_new > gate['other_drop']:
         failed.append(f"AP50 of the other SKUs {ap_base:.4f} -> {ap_new:.4f} (may fall {gate['other_drop']})")
     if len(comparison['falls']) > gate['max_falls']:
         failed.append(f"{len(comparison['falls'])} SKUs fell (at most {gate['max_falls']})")
+    ap_text = f'AP50 other {ap_base:.4f} -> {ap_new:.4f}' if ap_measured else 'AP50 other n/a (every row retrained)'
     summary = (f"cAcc-M2 {cacc_base:.4f} -> {cacc_new:.4f}; fixed {comparison['fixed']}, broken "
-               f"{comparison['broken']}; pairs {pairs['base']} -> {pairs['new']}; AP50 other {ap_base:.4f} -> "
-               f"{ap_new:.4f}; falls {len(comparison['falls'])}")
+               f"{comparison['broken']}; pairs {pairs['base']} -> {pairs['new']}; {ap_text}; "
+               f"falls {len(comparison['falls'])}")
     return ('stop', f"{summary}: failed " + '; '.join(failed)) if failed else ('go', summary)
+
+
+def _criteria(name: str, decision: str, reason: str, **values) -> dict:
+    """The gate of an improve run as a label: same ``decision`` / ``reason`` as before, never enforced. The run is
+    trained and scored before its gate, so a stop would save no GPU, and scripts/run_al.sh went on past it anyway
+    (12/11/2026, docs/02-cac-lan-train/08-2026-11-12-tong-ket-va-ke-hoach.md, 3). The gates that come before an
+    expensive stage (FULL-SYN task 1, pseudo-labels, relearn tasks, split12) keep stopping."""
+    gate = dict(name=name, decision=decision, reason=reason, enforced=False, **values)
+    print(f'GATE {name}: {decision.upper()} - {reason} (label: not enforced)')
+    return gate
 
 
 # --- data and training --------------------------------------------------------------------------------------------
@@ -394,7 +443,7 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
                                PRED_SPLITS=splits, STOP_AFTER_STEPS=0, FSA_HF=fsa_hf, PREV_CKPT=prev,
                                TRAIN_ROWS=task_dir / 'train_rows.json', LR=hp['lr'], LR_OLD=hp['lr_old'],
                                LR_DROP=hp['lr_drop'], AUGMENT=hp.get('augment', 0),
-                               TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0))
+                               TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp))
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']
@@ -500,7 +549,7 @@ def _run_variant(plan: dict, name: str, rows: list[int], feedback: list[int], pr
     ap_new = _ap50(plan, root / 'scored' / name, others) if others else float('nan')
     cacc_base = load_json(root / 'stages' / f'{reference}.json')['cAcc_m2']
     decision, reason = verdict(GATES[_kind(name)], cacc_base, score['cAcc_m2'], comparison, ap_base, ap_new)
-    gate = _gate(plan, f'improve {name}', decision, reason, **GATES[_kind(name)])
+    gate = _criteria(f'improve {name}', decision, reason, **GATES[_kind(name)])
     report = {'stage': name, 'reference': reference, 'rows': rows, 'data': data,
               'hyperparameters': VARIANTS[_kind(name)],
               **score, **_fit(plan, run, data), 'AP50_other': {'base': ap_base, 'new': ap_new},

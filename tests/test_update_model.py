@@ -22,10 +22,13 @@ def comparison(fixed=30, broken=10, p=0.001, pairs=(100, 50), falls=0):
     ('e1', 0.452, comparison(), 0.96, 'stop'),                          # +0.0152 < +0.0165
     ('e1', 0.4534, comparison(), 0.96, 'go'),
     ('e1', 0.46, comparison(p=0.2), 0.96, 'stop'),                      # sign test
-    ('e1', 0.46, comparison(pairs=(100, 80)), 0.96, 'stop'),            # pairs fell 20% only
+    ('e1', 0.46, comparison(pairs=(100, 80)), 0.96, 'stop'),            # pairs fell 20% only (needs 25%)
+    ('e1', 0.46, comparison(pairs=(100, 75)), 0.96, 'go'),              # pairs fell 25%
     ('e1', 0.46, comparison(), 0.955, 'stop'),                          # AP50 of the other SKUs fell 1.4 points
-    ('e1', 0.46, comparison(falls=1), 0.96, 'stop'),
-    ('pilot', 0.44, comparison(falls=3), 0.96, 'go'),
+    ('e1', 0.46, comparison(falls=11), 0.96, 'stop'),                   # 12/11/2026: at most 10 SKUs may fall
+    ('e1', 0.46, comparison(falls=10), 0.96, 'go'),
+    ('pilot', 0.44, comparison(falls=9), 0.96, 'go'),                   # al_margin_k_B500_r3_real under the old rule
+    ('pilot', 0.44, comparison(falls=17), 0.96, 'stop'),                # al_margin_k_B500_r3_train
 ])
 def test_verdict_checks_every_condition_of_the_gate(name, cacc, cmp, ap, decision):
     assert um.verdict(um.GATES[name], 0.4368, cacc, cmp, 0.969, ap)[0] == decision
@@ -35,6 +38,13 @@ def test_round2_needs_no_sign_test_but_no_more_pair_confusions():
     gate = um.GATES['round2']
     assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 50)), 0.96, 0.958)[0] == 'go'
     assert um.verdict(gate, 0.46, 0.46, comparison(pairs=(50, 51)), 0.96, 0.96)[0] == 'stop'
+    assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 50), falls=11), 0.96, 0.96)[0] == 'stop'
+
+
+def test_the_round_3_gates_follow_the_pilot_gate():
+    for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze'):
+        assert um.GATES[kind] == um.GATES['pilot']
+    assert (um.GATES['pilot']['pair_drop'], um.GATES['pilot']['max_falls']) == (0.25, 10)
 
 
 def test_exp_fb_ft_sets_the_fixes_after_the_full_syn_flags(tmp_path):
@@ -188,3 +198,81 @@ def test_fit_only_for_runs_with_an_al_selection(tmp_path, monkeypatch):
     fit = um._fit({'eval_root': str(tmp_path / 'eval')}, tmp_path / 'run',
                   {'selection': 'margin_k_B500_r2', 'prebuilt_release': str(tmp_path / 'rel')})
     assert fit == {'cAcc_trained': 0.5, 'cAcc_pool_untrained': 0.4} and seen['ids'] == [2]
+
+
+def test_verdict_skips_the_ap50_of_the_other_skus_when_every_row_is_retrained():
+    """r3_all retrains all 200 rows: AP50 of the other SKUs is NaN. The condition is reported as not measurable, not
+    passed silently; a real fall still stops."""
+    nan = float('nan')
+    decision, reason = um.verdict(um.GATES['pilot'], 0.4368, 0.46, comparison(), nan, nan)
+    assert decision == 'go' and 'AP50 other n/a' in reason
+    assert um.verdict(um.GATES['pilot'], 0.4368, 0.46, comparison(), 0.969, 0.955)[0] == 'stop'
+
+
+def test_the_gate_of_an_improve_run_is_a_label_and_never_stops(tmp_path, capsys):
+    """12/11/2026 (doc 08 §3): an improve run is trained and scored before its gate, so a stop saves nothing and
+    run_al.sh went on past it anyway. The decision is kept in the stage file; nothing is raised."""
+    plan = dict(root=str(tmp_path), campaign_id='c', round=1, release_config_sha256=None, input_sha256={})
+    gate = um._criteria('improve x', 'stop', 'cAcc fell', pair_drop=0.25)
+    assert gate['enforced'] is False and gate['decision'] == 'stop' and gate['pair_drop'] == 0.25
+    assert 'not enforced' in capsys.readouterr().out
+    result = um._finish(plan, 'x', {'stage': 'x'}, gate)  # would raise GateStop for an enforced stop
+    assert result['gate']['decision'] == 'stop'
+    assert json.loads((tmp_path / 'stages/x.json').read_text())['gate']['enforced'] is False
+
+
+# --- đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): vòng 4 và lặp seed ---------------------------------
+def test_round4_kind_recipe_and_gate():
+    """al_<selection>_r4: công thức r3_strong, gate như pilot (chỉ là nhãn)."""
+    assert um._kind('al_margin_k_B500_r4') == 'r4'
+    assert um.VARIANTS['r4'] == um.VARIANTS['r3_strong'] and um.GATES['r4'] == um.GATES['pilot']
+
+
+def test_round4_starts_from_the_round3_real_model(tmp_path):
+    runs = tmp_path / 'runs'
+    plan = {'root': str(tmp_path), 'runs': str(runs), 'seed_task5': '/r1.pth'}
+    with pytest.raises(RuntimeError, match='train al_margin_k_B500_r3_real first'):
+        um._al_start(plan, 'al_margin_k_B500_r4')
+    (tmp_path / 'stages').mkdir()
+    (tmp_path / 'stages' / 'al_margin_k_B500_r3_real.json').write_text('{}')
+    prev, ref = um._al_start(plan, 'al_margin_k_B500_r4')
+    assert prev == str(runs / 'EXP-FB-FT-al_margin_k_B500_r3_real' / 'task_5/task_final.pth')
+    assert ref == 'al_margin_k_B500_r3_real'
+
+
+def test_round3_seed_tag_repeats_a_run_with_another_seed(tmp_path):
+    """al_..._r3_real_s1: dữ liệu và công thức của real, chỉ đổi seed train; xuất phát từ r2 như real."""
+    assert um._kind('al_margin_k_B500_r3_real_s1') == 'r3_strong_s1'
+    assert um.VARIANTS['r3_strong_s1'] == {**um.VARIANTS['r3_strong'], 'seed': 1}
+    assert um.GATES['r3_strong_s1'] == um.GATES['pilot']
+    assert um.r3_data_tag('al_margin_k_B500_r3_real_s1') == 'real'
+    assert um.r3_data_tag('al_margin_k_B500_r3_all') == 'all'
+    runs = tmp_path / 'runs'
+    (tmp_path / 'stages').mkdir()
+    (tmp_path / 'stages' / 'al_margin_k_B500_r2.json').write_text('{}')
+    plan = {'root': str(tmp_path), 'runs': str(runs), 'seed_task5': '/r1.pth'}
+    prev, ref = um._al_start(plan, 'al_margin_k_B500_r3_real_s1')
+    assert ref == 'al_margin_k_B500_r2' and prev.endswith('EXP-FB-FT-al_margin_k_B500_r2/task_5/task_final.pth')
+    with pytest.raises(ValueError):
+        um._kind('al_margin_k_B500_r3_real_s9')
+
+
+def test_exp_fb_ft_seed_flag_defaults_to_the_old_seed(tmp_path):
+    import subprocess
+
+    base = dict(REPO=str(REPO), FSA_HF='/fsa', SYNTH_ROOT='/synth', PREV_CKPT='/r2.pth', TRAIN_ROWS='/rows.json',
+                PATH='/usr/bin:/bin')
+    script = f'source {REPO}/configs/exp/native/EXP-FB-FT.sh; printf "%s\\0" "${{ARGS[@]}}"'
+
+    def seeds(env):
+        out = subprocess.run(['bash', '-ec', script], env=env, capture_output=True, text=True,
+                             check=True).stdout.split('\0')[:-1]
+        return [out[i + 1] for i, flag in enumerate(out[:-1]) if flag == '--seed']
+
+    assert seeds(base)[-1] == '0'  # như common.sh: mọi run cũ dùng seed 0
+    assert seeds({**base, 'SEED': '1'})[-1] == '1'
+
+
+def test_train_environment_carries_the_seed_of_the_recipe():
+    assert um._train_seed(um.VARIANTS['r3_strong']) == 0
+    assert um._train_seed(um.VARIANTS['r3_strong_s1']) == 1

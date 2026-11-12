@@ -229,3 +229,44 @@ def test_round3_no_face_v2_only_for_the_round3_group(release, tmp_path, monkeypa
     (tmp_path / 'configs/relearn/rows_r3.json').write_text(json.dumps([2, 3]))
     m = bv.build(release, 's1', rows=rows, no_face_v2=4, full_face=face, name='nf4')
     assert m['no_face_rows'] == [2]
+
+
+def test_round4_selects_from_the_round3_model_and_names_the_variant_r4(release, tmp_path):
+    """Vòng 4 (docs/design/2026-11-12-dot-gpu-1): --from al_<sel>_r3_real đọc tập chọn <sel>_r2, chọn thêm từ pool
+    còn lại bằng dự đoán của r3_real, ghi tập chọn <sel>_r3 và dựng gói al_<sel>_r4 (tùy chọn vòng 3 của real)."""
+    import numpy as np
+
+    from autocheckout.predictions import Predictions, save_predictions
+    from tools import al_round2
+
+    _w(release / 'relearn/active/selections/m_r2.json',
+       {'strategy': 'margin', 'budget': 2, 'seed': None, 'opts': {'round': 2, 'from': 'al_m'}, 'pool_md5': 'x',
+        'image_ids': [2, 3]})
+    campaign = tmp_path / 'camp'
+    ids = [1, 2, 3, 4, 5, 6, 7, 8]
+    margins = {1: 0.2, 2: 0.0, 3: 0.0, 4: 0.1, 5: 0.9, 6: 0.0, 7: 0.0, 8: 0.95}
+    rows = [(i, 0, 0, 0.9, [0, 0, 5, 5]) for i in ids] + [(i, 0, 1, 0.9 - margins[i], [0, 0, 5, 5]) for i in ids]
+    image, query, label, score, boxes = zip(*rows, strict=True)
+    save_predictions(campaign / 'runs/EXP-FB-FT-al_m_r3_real/task_5/pred_val.npz',
+                     Predictions(np.array(image), np.array(query), np.array(label), np.array(score), np.array(boxes)))
+    built = {}
+    out = al_round2.round2(release, campaign, 'al_m_r3_real', budget=1,
+                           build=lambda data, sel, **kw: built.update(sel=sel, **kw) or {'variant': kw['name']})
+    chosen = load_json(release / 'relearn/active/selections/m_r3.json')
+    assert chosen['image_ids'] == [2, 3, 4] and chosen['new_image_ids'] == [4]
+    assert chosen['opts']['round'] == 3 and chosen['opts']['from'] == 'al_m_r3_real'
+    assert out['variant'] == 'al_m_r4' and built['sel'] == 'm_r3' and built['name'] == 'al_m_r4'
+    assert built['base'] == 'e1' and built['repeat'] == al_round2.R4_REPEAT and built['v2_keep'] == 0.5
+    assert built['no_face_v2'] == 600 and built['rows'].name == 'rows_r3.json'
+    with pytest.raises(ValueError):  # chỉ từ run real của vòng 3
+        al_round2.round2(release, campaign, 'al_m_r3_all', budget=1)
+    only = al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)  # --select-only
+    assert only['variant'] == 'al_m_r4' and only['selection'] == 'm_r3' and only['new_images'] == 1
+    # a shipped selection is reused (same predictions), never selected again; other predictions are refused
+    before = (release / 'relearn/active/selections/m_r3.json').read_text()
+    again = al_round2.round2(release, campaign, 'al_m_r3_real', budget=2, build=lambda d, s, **kw: {'variant': 'x'})
+    assert again == {'variant': 'x'} and (release / 'relearn/active/selections/m_r3.json').read_text() == before
+    _w(release / 'relearn/active/selections/m_r3.json', {**load_json(release / 'relearn/active/selections/m_r3.json'),
+                                                         'pred_md5': 'other'})
+    with pytest.raises(ValueError, match='other predictions'):
+        al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
