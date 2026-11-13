@@ -276,3 +276,68 @@ def test_exp_fb_ft_seed_flag_defaults_to_the_old_seed(tmp_path):
 def test_train_environment_carries_the_seed_of_the_recipe():
     assert um._train_seed(um.VARIANTS['r3_strong']) == 0
     assert um._train_seed(um.VARIANTS['r3_strong_s1']) == 1
+
+
+# --- đợt GPU 1 (docs/design/2026-11-12-dot-gpu-1): B0 test2019 trên campaign tải từ Drive ---------------------------
+def _drive_campaign(tmp_path):
+    """Campaign như install_r4.sh kéo về: inputs/<run>/ không có test_full.json (symlink, rclone không upload)."""
+    eval_root = tmp_path / 'eval'
+    eval_root.mkdir()
+    (eval_root / 'test_full.json').write_text('{"images": []}')
+    root = tmp_path / 'camp'
+    (root / 'inputs/al_margin_k_B500_r3_real').mkdir(parents=True)
+    (root / 'stages').mkdir()
+    for stage in ('al_margin_k_B500_r2', 'al_margin_k_B500_r3_real'):
+        (root / 'stages' / f'{stage}.json').write_text('{"cAcc_m2": 0.65}')
+    return {'root': str(root), 'runs': str(root / 'runs'), 'eval_root': str(eval_root), 'dry_run': False,
+            'seed_task5': str(tmp_path / 'r1.pth'), 'release_root': str(tmp_path / 'release')}
+
+
+def test_link_test_full_restores_the_link_rclone_did_not_upload(tmp_path):
+    plan = _drive_campaign(tmp_path)
+    link = um._link_test_full(plan, 'al_margin_k_B500_r3_real')
+    assert link == Path(plan['root']) / 'inputs/al_margin_k_B500_r3_real/test_full.json'
+    assert link.is_symlink() and link.resolve() == (Path(plan['eval_root']) / 'test_full.json').resolve()
+    assert um._link_test_full(plan, 'al_margin_k_B500_r3_real') == link  # chạy lại: giữ nguyên
+
+
+def test_link_test_full_replaces_a_broken_link(tmp_path):
+    plan = _drive_campaign(tmp_path)
+    link = Path(plan['root']) / 'inputs/al_margin_k_B500_r3_real/test_full.json'
+    link.symlink_to(tmp_path / 'old_machine/eval/test_full.json')  # campaign chép từ máy khác
+    um._link_test_full(plan, 'al_margin_k_B500_r3_real')
+    assert link.resolve() == (Path(plan['eval_root']) / 'test_full.json').resolve()
+
+
+def test_link_test_full_refuses_a_missing_test2019_file(tmp_path):
+    plan = _drive_campaign(tmp_path)
+    (Path(plan['eval_root']) / 'test_full.json').unlink()
+    with pytest.raises(FileNotFoundError, match='test_full.json'):
+        um._link_test_full(plan, 'al_margin_k_B500_r3_real')
+
+
+def test_final_test_of_a_variant_links_test_full_before_predicting(tmp_path, monkeypatch):
+    plan = _drive_campaign(tmp_path)
+
+    class Predicting(Exception):
+        pass
+
+    def train(plan_, record, attempt, name, task_dir, *args, **kwargs):
+        assert (task_dir / 'test_full.json').is_file()
+        raise Predicting
+
+    monkeypatch.setattr(um, '_train', train)
+    monkeypatch.setattr(um, '_attempt', _no_attempt)
+    with pytest.raises(Predicting):
+        um.stage_final_test(plan, confirm=True, variant='al_margin_k_B500_r3_real')
+
+
+class _no_attempt:
+    def __init__(self, plan, stage):
+        pass
+
+    def __enter__(self):
+        return {}, Path('.')
+
+    def __exit__(self, *exc):
+        return False

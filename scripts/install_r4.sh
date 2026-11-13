@@ -4,7 +4,8 @@
 #   1. code nhánh feat/dot-gpu-1 (install.sh của gói r3 đã ghi đè code về commit 1d40e74);
 #   2. weights, pred, stage, scored, inputs của al_margin_k_B500_r3_real và _r3_all (đợt al_r3 09/11);
 #   3. weights_md5.txt của đợt al_r3 (case al_r4 của vast_train_and_sync.sh kiểm md5 trước khi train);
-#   4. tập chọn vòng 4 margin_k_B500_r3.json (chọn trên Mac 12/11, kiểm rò rỉ 0).
+#   4. tập chọn vòng 4 margin_k_B500_r3.json (chọn trên Mac 12/11, kiểm rò rỉ 0);
+#   5. kiểm ảnh test2019 (B0) có đủ trong bộ dữ liệu.
 # Chạy trên máy GPU, sau gpu_bundle_r3/install.sh:  bash /workspace/AutoCheckout-CL/scripts/install_r4.sh
 # Chạy lại được: rclone chỉ tải file thiếu/khác.
 set -euo pipefail
@@ -67,4 +68,16 @@ assert len(ids) == 1500 and len(new) == 500 and len(set(ids)) == 1500, (len(ids)
 assert s['opts']['from'] == 'al_margin_k_B500_r3_real' and s['opts']['round'] == 3
 print(f"   tập chọn: {len(ids)} ảnh ({len(new)} mới), strategy {s['strategy']}, từ {s['opts']['from']}")
 PY
+echo "== 5. test2019 cho B0 (ảnh + nhãn; link inputs/<run>/test_full.json do update_model tự tạo lại)"
+python3 - "$DATA" <<'PY2' || fail "ảnh/nhãn test2019 thiếu (xem dòng trên): bộ dữ liệu 32 GB giải nén chưa đủ"
+import json, sys
+from pathlib import Path
+data = Path(sys.argv[1])
+test = data / 'eval/test_full.json'
+assert test.is_file(), f'thiếu {test}'
+images = json.load(open(test))['images']
+missing = [i['file_name'] for i in images if not (data / 'rpc' / i['file_name']).is_file()]
+assert not missing, f'thiếu {len(missing)}/{len(images)} ảnh test2019 trong {data}/rpc, ví dụ {missing[0]}'
+print(f'   test2019: {len(images)} ảnh, thiếu 0')
+PY2
 echo "  OK: sẵn sàng cho 'bash scripts/run_al.sh al_margin_k_B500_r4 --dry-run' rồi 'vast_train_and_sync.sh al_r4'"

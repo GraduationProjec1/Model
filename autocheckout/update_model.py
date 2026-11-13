@@ -613,6 +613,22 @@ def stage_round2(plan: dict) -> dict:
     return _run_variant(plan, 'round2', e1['rows'], wrong, str(e1_run / f'task_{STAGE}/task_final.pth'), 'e1')
 
 
+def _link_test_full(plan: dict, name: str) -> Path:
+    """inputs/<name>/test_full.json, the link to the test2019 file that build_task_dir made when the run trained.
+    rclone does not upload links, so a campaign restored from Drive (scripts/install_r4.sh) lacks it and PDP could
+    not predict test2019: link it again (a broken link from another machine too)."""
+    test = Path(plan['eval_root']) / 'test_full.json'
+    if not test.is_file():
+        raise FileNotFoundError(f'{test}: test2019 annotations missing (data folder incomplete?)')
+    link = _inputs(plan) / name / 'test_full.json'
+    if link.is_file():
+        return link
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.unlink(missing_ok=True)  # a broken link
+    link.symlink_to(test.resolve())
+    return link
+
+
 def stage_final_test(plan: dict, confirm: bool = False, variant: str | None = None) -> dict:
     """Test2019, scored once with the Val-B policies of the last improve run with a go, only with ``confirm=True``.
     With ``variant`` (an ``al_*`` run, whatever its gate), that run instead, in its own ``final_test_<variant>``."""
@@ -641,6 +657,7 @@ def stage_final_test(plan: dict, confirm: bool = False, variant: str | None = No
     prev = str(e1_final) if chosen == 'round2' else plan['seed_task5']
     if chosen.startswith('al_'):
         prev = _al_start(plan, chosen)[0]
+    _link_test_full(plan, chosen)
     with _attempt(plan, stage) as (record, attempt):
         variant = _prebuilt(plan, chosen)
         images = variant.parent.parent / 'images' if variant is not None else Path(plan['release_root']) / chosen

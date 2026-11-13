@@ -257,7 +257,7 @@ case "$TASK" in
                    "$CAMP/scored/$v/calibration_count_groups.json")
         done
         for f in "${NEED[@]}"; do
-            [[ -f "$f" ]] || { echo "[THIẾU] $f -> chạy gpu_bundle_r4/install.sh trước" | tee -a "$MAIN_LOG"; exit 3; }
+            [[ -f "$f" ]] || { echo "[THIẾU] $f -> chạy scripts/install_r4.sh trước" | tee -a "$MAIN_LOG"; exit 3; }
         done
         # weights_md5.txt (logs/ của đợt al_r3, đường dẫn ./relearn-fix-v2/...): gói r4 đặt cạnh campaign
         WMD5="${WEIGHTS_MD5:-$CAMP/../weights_md5.txt}"
