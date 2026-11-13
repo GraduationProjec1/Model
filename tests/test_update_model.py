@@ -11,9 +11,10 @@ from autocheckout.predictions import load_predictions
 REPO = Path(__file__).resolve().parent.parent
 
 
-def comparison(fixed=30, broken=10, p=0.001, pairs=(100, 50), falls=0):
+def comparison(fixed=30, broken=10, p=0.001, pairs=(100, 50), falls=0, largest=(60, 30)):
+    top = None if largest is None else {'pair': [0, 1], 'base': largest[0], 'new': largest[1]}
     return {'fixed': fixed, 'broken': broken, 'sign_test_p': p, 'falls': [{}] * falls,
-            'pair_confusions_in_rows': {'base': pairs[0], 'new': pairs[1]}}
+            'pair_confusions_in_rows': {'base': pairs[0], 'new': pairs[1]}, 'largest_pair_in_rows': top}
 
 
 @pytest.mark.parametrize('name, cacc, cmp, ap, decision', [
@@ -34,17 +35,55 @@ def test_verdict_checks_every_condition_of_the_gate(name, cacc, cmp, ap, decisio
     assert um.verdict(um.GATES[name], 0.4368, cacc, cmp, 0.969, ap)[0] == decision
 
 
-def test_round2_needs_no_sign_test_but_no_more_pair_confusions():
+def test_round2_needs_no_sign_test_and_a_10_percent_pair_fall():
+    """13/11/2026: round2 pair_drop 0 -> 0.10 (a later round starts from fewer, harder confusions)."""
     gate = um.GATES['round2']
-    assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 50)), 0.96, 0.958)[0] == 'go'
-    assert um.verdict(gate, 0.46, 0.46, comparison(pairs=(50, 51)), 0.96, 0.96)[0] == 'stop'
-    assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 50), falls=11), 0.96, 0.96)[0] == 'stop'
+    assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 45)), 0.96, 0.958)[0] == 'go'
+    assert um.verdict(gate, 0.46, 0.46, comparison(pairs=(50, 46)), 0.96, 0.96)[0] == 'stop'
+    assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 45), falls=11), 0.96, 0.96)[0] == 'stop'
+    # al_margin_k_B500_r2 (stage file): pairs 201 -> 168 (16 %), 162<->186 103 -> 99: stopped under 0.25, goes now
+    assert um.verdict(gate, 0.5406, 0.5678, comparison(p=1e-6, pairs=(201, 168), largest=(103, 99)),
+                      0.96, 0.96)[0] == 'go'
 
 
-def test_the_round_3_gates_follow_the_pilot_gate():
-    for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze'):
-        assert um.GATES[kind] == um.GATES['pilot']
+def test_later_round_gates_follow_the_pilot_gate_with_a_10_percent_pair_fall():
+    """13/11/2026 (doc 08 §2.4): the first round keeps 0.25; rounds that start from an improved model need 0.10."""
+    later = {**um.GATES['pilot'], 'pair_drop': 0.10}
+    for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze', 'r4', 'r3_strong_s1'):
+        assert um.GATES[kind] == later
     assert (um.GATES['pilot']['pair_drop'], um.GATES['pilot']['max_falls']) == (0.25, 10)
+    assert all(um.GATES[kind]['pair_drop'] == 0.25 for kind in ('pilot', 'e1', 'e2'))
+    assert all(gate['top_pair_rise'] == 0.05 for gate in um.GATES.values())
+
+
+@pytest.mark.parametrize('kind, pairs, decision', [
+    ('pilot', (100, 80), 'stop'),        # first round: 20 % < 25 %
+    ('r3_strong', (100, 85), 'go'),      # later round: 15 % >= 10 %
+    ('r3_strong', (100, 92), 'stop'),    # 8 % (al_margin_k_B500_r3_rows fell 7.7 %)
+    ('r4', (313, 281), 'go'),            # round 4 from r3_real: 10.2 %
+])
+def test_pair_drop_by_kind_of_run(kind, pairs, decision):
+    assert um.verdict(um.GATES[kind], 0.5582, 0.60, comparison(pairs=pairs), 0.96, 0.96)[0] == decision
+
+
+@pytest.mark.parametrize('largest, decision', [
+    ((99, 108), 'stop'),   # al_margin_k_B500_r3_train: 162<->186 rose 9 %
+    ((99, 104), 'stop'),   # 104 > 99 * 1.05 = 103.95
+    ((99, 103), 'go'),
+    ((99, 100), 'go'),     # al_margin_k_B500_r3_rows: one object more is noise
+    ((99, 92), 'go'),      # al_margin_k_B500_r3_real
+])
+def test_largest_pair_may_not_rise_more_than_5_percent(largest, decision):
+    """13/11/2026: r3_train cut its pair confusions 9.7 % but made the largest pair (162<->186 milk) worse."""
+    cmp = comparison(pairs=(443, 313), largest=largest)
+    decision_, reason = um.verdict(um.GATES['r3_strong'], 0.5582, 0.60, cmp, 0.96, 0.96)
+    assert decision_ == decision
+    assert ('largest pair' in reason) == (decision == 'stop')
+
+
+def test_largest_pair_is_reported_as_not_measurable_without_a_pair_in_the_rows():
+    decision, reason = um.verdict(um.GATES['pilot'], 0.4368, 0.46, comparison(largest=None), 0.96, 0.96)
+    assert decision == 'go' and 'top pair n/a' in reason
 
 
 def test_exp_fb_ft_sets_the_fixes_after_the_full_syn_flags(tmp_path):
@@ -223,9 +262,9 @@ def test_the_gate_of_an_improve_run_is_a_label_and_never_stops(tmp_path, capsys)
 
 # --- đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): vòng 4 và lặp seed ---------------------------------
 def test_round4_kind_recipe_and_gate():
-    """al_<selection>_r4: công thức r3_strong, gate như pilot (chỉ là nhãn)."""
+    """al_<selection>_r4: công thức r3_strong, gate như pilot với pair_drop 0,10 (chỉ là nhãn)."""
     assert um._kind('al_margin_k_B500_r4') == 'r4'
-    assert um.VARIANTS['r4'] == um.VARIANTS['r3_strong'] and um.GATES['r4'] == um.GATES['pilot']
+    assert um.VARIANTS['r4'] == um.VARIANTS['r3_strong'] and um.GATES['r4'] == um.GATES['r3_strong']
 
 
 def test_round4_starts_from_the_round3_real_model(tmp_path):
@@ -244,7 +283,7 @@ def test_round3_seed_tag_repeats_a_run_with_another_seed(tmp_path):
     """al_..._r3_real_s1: dữ liệu và công thức của real, chỉ đổi seed train; xuất phát từ r2 như real."""
     assert um._kind('al_margin_k_B500_r3_real_s1') == 'r3_strong_s1'
     assert um.VARIANTS['r3_strong_s1'] == {**um.VARIANTS['r3_strong'], 'seed': 1}
-    assert um.GATES['r3_strong_s1'] == um.GATES['pilot']
+    assert um.GATES['r3_strong_s1'] == um.GATES['r3_strong']
     assert um.r3_data_tag('al_margin_k_B500_r3_real_s1') == 'real'
     assert um.r3_data_tag('al_margin_k_B500_r3_all') == 'all'
     runs = tmp_path / 'runs'

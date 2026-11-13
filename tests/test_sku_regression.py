@@ -48,6 +48,23 @@ def test_fixed_broken_pairs_and_falls():
     shares = {s['label']: (s['base'], s['new']) for s in report['per_sku']}
     assert shares == {0: (1.0, 1.0), 1: (0.5, 1.0), 2: (1.0, 0.0)}
     assert report['top_pairs'][0]['pair'] in ([0, 1], [1, 2])
+    # 13/11/2026: the gate's "largest pair" is the pair inside the rows with the most base confusions
+    assert report['largest_pair_in_rows'] == {'pair': [0, 1], 'base': 1, 'new': 0}
+
+
+def test_largest_pair_in_rows_ignores_pairs_outside_the_rows_and_ranks_by_base():
+    # image 1: 0 called 1; image 2: 1 called 2 (twice in base, the 1-2 pair is outside rows [0, 1])
+    val = coco([[(0, 0)], [(1, 0), (1, 20)]])
+    base = preds([(1, 1, 0), (2, 2, 0), (2, 2, 20)])
+    new = preds([(1, 1, 0), (2, 1, 0), (2, 1, 20)])
+    report = sr.compare(val, base, new, labels=range(3), rows=[0, 1])
+    assert report['largest_pair_in_rows'] == {'pair': [0, 1], 'base': 1, 'new': 1}
+
+
+def test_largest_pair_in_rows_is_none_without_a_confusion_in_the_rows():
+    report = sr.compare(VAL, preds([(1, 0, 0), (1, 1, 20), (2, 1, 0), (3, 2, 0)]),
+                        preds([(1, 0, 0), (1, 1, 20), (2, 1, 0), (3, 2, 0)]), labels=range(3), rows=[0, 1])
+    assert report['largest_pair_in_rows'] is None
 
 
 def test_fell_needs_both_a_recall_drop_and_lost_objects():

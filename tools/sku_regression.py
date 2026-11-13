@@ -145,6 +145,8 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
 
     before, after = pairs(a['swapped']), pairs(b['swapped'])
     in_rows = [p for p in set(before) | set(after) if rows and set(p) <= rows]
+    # 13/11/2026: the pair of the gate's "largest pair may not rise" (most base confusions, ties by pair)
+    largest = min((p for p in in_rows if before[p]), key=lambda p: (-before[p], p), default=None)
     return {
         'images': len(images),
         'cAcc_base': float(np.mean([a['correct'][i] for i in images])) if images else float('nan'),
@@ -152,6 +154,8 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
         'fixed': fixed, 'broken': broken,
         'sign_test_p': float(binom.sf(fixed - 1, fixed + broken, 0.5)) if fixed + broken else 1.0,
         'pair_confusions_in_rows': {'base': sum(before[p] for p in in_rows), 'new': sum(after[p] for p in in_rows)},
+        'largest_pair_in_rows': (None if largest is None else
+                                 {'pair': list(largest), 'base': before[largest], 'new': after[largest]}),
         'other_objects_called_rows': {
             'base': sum(c for (t, p), c in a['swapped'].items() if rows and t not in rows and p in rows),
             'new': sum(c for (t, p), c in b['swapped'].items() if rows and t not in rows and p in rows)},

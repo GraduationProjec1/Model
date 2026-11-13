@@ -78,15 +78,23 @@ TRAIN_SEED = 0  # --seed of configs/exp/native/common.sh: every run before B4 tr
 # 12/11/2026 (docs/02-cac-lan-train/08-2026-11-12-tong-ket-va-ke-hoach.md, 2.4 and 6): pair_drop 0.30 -> 0.25 and
 # max_falls -> 10 with the new fall rule. 18 of 20 variants of rounds 1-3 stopped on 1-9 SKUs losing 3-6 objects while
 # cAcc-M2 rose 10-23 points; with these rules 16 of 18 pass and al_margin_k_B500_r3_train (17 falls) still stops.
+# 13/11/2026 (doc 08 §2.4): top_pair_rise: largest rise of the pair inside the rows with the most base confusions
+# (tools.sku_regression largest_pair_in_rows; r3_train cut its pairs 9.7 % but 162<->186 rose 99 -> 108). A round
+# that starts from an improved model (round2, r3, r4) needs a pair fall of 0.10, not 0.25: its confusions left are
+# fewer and harder (rounds 1: 36-66 %, round 2: 15-16 %, r3_real: 29 %).
+FIRST_PAIR_DROP, LATER_PAIR_DROP, TOP_PAIR_RISE = 0.25, 0.10, 0.05
 GATES = {
-    'pilot': dict(gain=0.0, strict=True, sign_p=0.05, pair_drop=0.25, other_drop=0.01, max_falls=10),
-    'e1': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.25, other_drop=0.01, max_falls=10),
-    'e2': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=0.25, other_drop=0.01, max_falls=10),
-    'round2': dict(gain=0.0, strict=False, sign_p=None, pair_drop=0.0, other_drop=0.005, max_falls=10),
+    'pilot': dict(gain=0.0, strict=True, sign_p=0.05, pair_drop=FIRST_PAIR_DROP, other_drop=0.01, max_falls=10),
+    'e1': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=FIRST_PAIR_DROP, other_drop=0.01, max_falls=10),
+    'e2': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=FIRST_PAIR_DROP, other_drop=0.01, max_falls=10),
+    'round2': dict(gain=0.0, strict=False, sign_p=None, pair_drop=LATER_PAIR_DROP, other_drop=0.005, max_falls=10),
 }
-# Round 3: the pilot gate is only reported; the decision follows the criteria of the design (11-C, 11-D).
-GATES.update({kind: dict(GATES['pilot']) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze', 'r4')})
-GATES.update({f'{R3_TAGS[data]}_s{seed}': dict(GATES['pilot']) for data, seed in SEED_TAGS.values()})
+# Round 3 and later: the pilot gate with the pair fall of a later round, only reported; the decision follows the
+# criteria of the design (11-C, 11-D).
+LATER = {**GATES['pilot'], 'pair_drop': LATER_PAIR_DROP}
+GATES.update({kind: dict(LATER) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze', 'r4')})
+GATES.update({f'{R3_TAGS[data]}_s{seed}': dict(LATER) for data, seed in SEED_TAGS.values()})
+GATES = {kind: {**gate, 'top_pair_rise': TOP_PAIR_RISE} for kind, gate in GATES.items()}
 # Quota of the synthetic images (settings, objects per retrained SKU): from the full-face relearn release, from v2
 # for an SKU the relearn release covers, from v2 for an SKU it does not. Without these keys every synthetic image
 # holding a retrained SKU is taken (the first version: 29,539 v2 images for the pilot rows, 62,061 for e1).
@@ -319,10 +327,15 @@ def verdict(gate: dict, cacc_base: float, cacc_new: float, comparison: dict, ap_
         failed.append(f"AP50 of the other SKUs {ap_base:.4f} -> {ap_new:.4f} (may fall {gate['other_drop']})")
     if len(comparison['falls']) > gate['max_falls']:
         failed.append(f"{len(comparison['falls'])} SKUs fell (at most {gate['max_falls']})")
+    top = comparison.get('largest_pair_in_rows')  # None: no confusion inside the rows, nothing to judge
+    if top is not None and top['new'] > top['base'] * (1 + gate['top_pair_rise']):
+        failed.append(f"largest pair {top['pair']} {top['base']} -> {top['new']} "
+                      f"(may rise {gate['top_pair_rise']:.0%})")
+    top_text = f"top pair {top['pair']} {top['base']} -> {top['new']}" if top is not None else 'top pair n/a'
     ap_text = f'AP50 other {ap_base:.4f} -> {ap_new:.4f}' if ap_measured else 'AP50 other n/a (every row retrained)'
     summary = (f"cAcc-M2 {cacc_base:.4f} -> {cacc_new:.4f}; fixed {comparison['fixed']}, broken "
                f"{comparison['broken']}; pairs {pairs['base']} -> {pairs['new']}; {ap_text}; "
-               f"falls {len(comparison['falls'])}")
+               f"falls {len(comparison['falls'])}; {top_text}")
     return ('stop', f"{summary}: failed " + '; '.join(failed)) if failed else ('go', summary)
 
 
