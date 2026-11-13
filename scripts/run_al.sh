@@ -14,7 +14,8 @@
 #   bash scripts/run_al.sh dot1 --dry-run       # chỉ dựng dữ liệu (CPU), không train
 #   bash scripts/run_al.sh test al_margin_k_B500 al_random_B500_s0 --confirm-test   # test2019, MỘT lần mỗi run
 #
-# Bị ngắt thì chạy lại đúng lệnh: run đã có stages/<tên>.json được bỏ qua, điểm đã có cũng bỏ qua.
+# Bị ngắt thì chạy lại đúng lệnh: run đã có stages/<tên>.json được bỏ qua, điểm đã có (kể cả test2019) cũng bỏ qua.
+# Một run lỗi không chặn các run sau; cuối lệnh in [LỖI] <run> và thoát mã 1 nếu có run lỗi.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 # Thư mục dữ liệu chung (autocheckout/datapaths.py): ../autocheckout-data cạnh repo, hoặc AC_DATA=/duong/dan.
@@ -50,15 +51,27 @@ export AC_DATA=$DATA
 mkdir -p data/training/update-model
 LOG=data/training/update-model/run_al.log
 um() { python -m autocheckout.update_model --mode improve --settings "$SETTINGS" "$@" 2>&1 | tee -a "$LOG"; }
+FAILED=()
+failed() { echo "[LỖI] $1 (xem $LOG)" | tee -a "$LOG" >&2; FAILED+=("$1"); }
+finish() {
+    [[ ${#FAILED[@]} -eq 0 ]] && return 0
+    echo "[LỖI] ${#FAILED[@]} run lỗi: ${FAILED[*]}" | tee -a "$LOG" >&2
+    exit 1
+}
 
 if [[ $TEST == 1 ]]; then
     [[ $CONFIRM == 1 ]] || { echo "test2019 chỉ chấm MỘT lần: thêm --confirm-test khi nhóm đã chốt" >&2; exit 2; }
     for v in "${VARIANTS[@]}"; do
-        um --stage final_test --variant "$v" --confirm-test
+        um --stage final_test --variant "$v" --confirm-test || { failed "$v test2019"; continue; }
+        if [[ -f $REL/active/scored_test/$v.json ]]; then  # đã chấm ở lần chạy trước: al_score không chấm lại
+            echo "$v: test2019 đã chấm ($REL/active/scored_test/$v.json), bỏ qua al_score" | tee -a "$LOG"
+            continue
+        fi
         python -m tools.al_score --name "$v" \
             --pred "$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_val.npz" \
-            --test-pred "$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_test.npz" 2>&1 | tee -a "$LOG"
+            --test-pred "$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_test.npz" 2>&1 | tee -a "$LOG" || failed "$v al_score test"
     done
+    finish
     exit 0
 fi
 
@@ -82,29 +95,38 @@ r3_build() {
         2>&1 | tee -a "$LOG"
 }
 
+build() {
+    local v=$1
+    if [[ $v == *_r3_* ]]; then
+        r3_build "$v"
+    elif [[ $v == *_r4 ]]; then
+        # vòng 4: từ model _r3_real; tập chọn <sel>_r3 có sẵn (chọn trên Mac, --select-only) thì chỉ dựng gói
+        python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r4}_r3_real" --budget "${R4_BUDGET:-500}" \
+            2>&1 | tee -a "$LOG"
+    elif [[ $v == *_r2 ]]; then
+        python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r2}" 2>&1 | tee -a "$LOG"
+    else
+        python -m tools.al_build_variant --selection "${v#al_}" 2>&1 | tee -a "$LOG"
+    fi
+}
+
 for v in "${VARIANTS[@]}"; do
     if [[ ! -f $REL/variants/$v/train_task_5_fix.json ]]; then
-        if [[ $v == *_r3_* ]]; then
-            r3_build "$v"
-        elif [[ $v == *_r4 ]]; then
-            # vòng 4: từ model _r3_real; tập chọn <sel>_r3 có sẵn (chọn trên Mac, --select-only) thì chỉ dựng gói
-            python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r4}_r3_real" --budget "${R4_BUDGET:-500}" \
-                2>&1 | tee -a "$LOG"
-        elif [[ $v == *_r2 ]]; then
-            python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r2}" 2>&1 | tee -a "$LOG"
-        else
-            python -m tools.al_build_variant --selection "${v#al_}" 2>&1 | tee -a "$LOG"
-        fi
+        build "$v" || { failed "$v dựng dữ liệu"; continue; }
     fi
     if [[ $DRY == 1 ]]; then
-        um --stage data --variant "$v"
+        um --stage data --variant "$v" || failed "$v --stage data"
         continue
     fi
     echo "=== $(date -u +%FT%TZ) $v" | tee -a "$LOG"
-    um --stage al --variant "$v" || true
+    # gate chỉ là nhãn (A6): update_model thoát mã khác 0 nghĩa là lỗi thật (crash, thiếu file, OOM)
+    um --stage al --variant "$v" || { failed "$v train"; continue; }
     PRED=$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_val.npz
-    if [[ -f $PRED && ! -f $REL/active/scored/$v.json ]]; then
-        python -m tools.al_score --name "$v" --pred "$PRED" 2>&1 | tee -a "$LOG"
+    if [[ -f $CAMPAIGN/stages/$v.json && -f $PRED && ! -f $REL/active/scored/$v.json ]]; then
+        python -m tools.al_score --name "$v" --pred "$PRED" 2>&1 | tee -a "$LOG" || failed "$v al_score"
     fi
 done
-[[ $DRY == 1 ]] || python -m tools.al_report --campaign "$CAMPAIGN" 2>&1 | tail -3 | tee -a "$LOG"
+if [[ $DRY != 1 ]]; then
+    python -m tools.al_report --campaign "$CAMPAIGN" 2>&1 | tail -3 | tee -a "$LOG" || failed "al_report"
+fi
+finish

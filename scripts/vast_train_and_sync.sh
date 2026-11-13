@@ -205,6 +205,19 @@ fi
 # ----------------- BƯỚC 2: CHẠY HUẤN LUYỆN THEO TASK -----------------
 echo "Bắt đầu chạy task: $TASK..." | tee -a "$MAIN_LOG"
 
+# Một bước lỗi không chặn bước sau (các bước độc lập), nhưng được ghi lại: cuối script thoát mã 1, run_metadata.txt
+# ghi [LỖI] và máy chỉ STOP (không destroy) để còn vào xem/chạy lại đúng lệnh.
+FAILED_STEPS=()
+step() {
+    local name=$1; shift
+    "$@" 2>&1 | tee -a "$MAIN_LOG"
+    local rc=${PIPESTATUS[0]}
+    if [[ $rc -ne 0 ]]; then
+        echo "[LỖI] bước $name thoát mã $rc (xem $MAIN_LOG)" | tee -a "$MAIN_LOG"
+        FAILED_STEPS+=("$name")
+    fi
+}
+
 case "$TASK" in
     al_dot1)
         echo ">> Chạy Active Learning đợt 1 (7 run B=500)..." | tee -a "$MAIN_LOG"
@@ -266,12 +279,12 @@ case "$TASK" in
             (cd "$CAMP/.." && md5sum -c --quiet --ignore-missing "$WMD5") || { echo "[THIẾU] md5 weights lệch $WMD5" | tee -a "$MAIN_LOG"; exit 3; }
         fi
         echo ">> B0: test2019 cho r3_real và r3_all (chấm một lần, ~1 giờ)..." | tee -a "$MAIN_LOG"
-        bash scripts/run_al.sh test al_margin_k_B500_r3_real al_margin_k_B500_r3_all --confirm-test 2>&1 | tee -a "$MAIN_LOG"
+        step B0 bash scripts/run_al.sh test al_margin_k_B500_r3_real al_margin_k_B500_r3_all --confirm-test
         echo ">> B4: al_margin_k_B500_r3_real_s1 (seed 1, ~2,7 giờ) rồi B1: al_margin_k_B500_r4 (~3 giờ)..." | tee -a "$MAIN_LOG"
-        bash scripts/run_al.sh al_margin_k_B500_r3_real_s1 al_margin_k_B500_r4 2>&1 | tee -a "$MAIN_LOG"
+        step B4+B1 bash scripts/run_al.sh al_margin_k_B500_r3_real_s1 al_margin_k_B500_r4
         if [[ "${R4_FREEZE:-0}" == "1" ]]; then
             echo ">> B3: al_margin_k_B500_r3_freeze (lr_old 0, dữ liệu của real, ~2,7 giờ)..." | tee -a "$MAIN_LOG"
-            R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze 2>&1 | tee -a "$MAIN_LOG"
+            step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
         fi
         ;;
     al_dot2)
@@ -296,4 +309,9 @@ case "$TASK" in
         ;;
 esac
 
+if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
+    echo "[LỖI] Task $TASK: bước lỗi ${FAILED_STEPS[*]}; máy chỉ STOP, không destroy" | tee -a "$MAIN_LOG" "$LOG_DIR/run_metadata.txt"
+    AUTO_DESTROY=0; AUTO_STOP=1
+    exit 1
+fi
 echo "Task $TASK đã hoàn thành tốt đẹp!" | tee -a "$MAIN_LOG"
