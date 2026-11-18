@@ -23,6 +23,13 @@ Nghiên cứu nhận diện và đếm sản phẩm tại quầy thanh toán b�
 | [Chỉ mục triển khai](docs/project/IMPLEMENTATION_INDEX.md), [vận hành](docs/data_preprocessing/OPERATIONS.md) | Code/config/tests mới, cách chạy lại và tiếp tục |
 | [Schema dữ liệu](docs/data_preprocessing/formats.md) | Native geometry mới và quy ước legacy để đối chiếu |
 
+## Xem train trực tiếp (W&B, tùy chọn)
+
+Đặt `AC_WANDB_PROJECT=<project>` và `WANDB_API_KEY=<key>` trước khi chạy (vd. `scripts/vast_train_and_sync.sh`):
+mỗi task gửi loss (`tr`, `ce`, `bbox`, `giou`…), `val_AP/AP50/AP75` và % GPU lên W&B trong lúc train. Run tên
+`<thư mục run>/task_<t>`, id lưu ở `task_<t>/wandb_run.json` nên resume ghi tiếp vào cùng run; không tải trọng số lên W&B.
+Không đặt `AC_WANDB_PROJECT` thì chỉ ghi CSV/`train.log` như cũ. Checkout-system đọc lại các run này ở AI → Giám sát → Đang train.
+
 ## Cấu trúc
 
 ```text

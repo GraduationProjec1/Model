@@ -184,6 +184,19 @@ git diff > "$LOG_DIR/config_snapshot/git_diff.patch" 2>&1 || true
     [[ -f "$DATA_DIR/README.md" ]] && echo "DATA_README_MD5=$(md5sum "$DATA_DIR/README.md" | cut -d' ' -f1)"
 } > "$LOG_DIR/config_snapshot/env.txt"
 
+# W1: xem loss/AP trực tiếp trên W&B khi đặt AC_WANDB_PROJECT (+ WANDB_API_KEY). Thiếu key thì tắt W&B và vẫn train
+# (log CSV/train.log như cũ), không để cả lượt GPU hỏng vì phần xem log.
+if [[ -n "${AC_WANDB_PROJECT:-}" ]]; then
+    if [[ -z "${WANDB_API_KEY:-}" ]]; then
+        echo "[W&B] AC_WANDB_PROJECT=$AC_WANDB_PROJECT nhưng thiếu WANDB_API_KEY: tắt W&B, vẫn train" | tee -a "$MAIN_LOG"
+        unset AC_WANDB_PROJECT
+    else
+        python -c "import wandb" 2>/dev/null || pip install --quiet "wandb==0.18.7"
+        echo "[W&B] log trực tiếp vào project $AC_WANDB_PROJECT" | tee -a "$MAIN_LOG"
+        echo "AC_WANDB_PROJECT=$AC_WANDB_PROJECT" >> "$LOG_DIR/config_snapshot/env.txt"
+    fi
+fi
+
 # Đồng bộ lên Drive mỗi SYNC_EVERY_MIN phút (mặc định 30; 0 = tắt): máy chết giữa chừng vẫn còn các run đã xong.
 SYNC_EVERY_MIN="${SYNC_EVERY_MIN:-30}"
 if command -v rclone &>/dev/null && [[ "$SYNC_EVERY_MIN" -gt 0 ]]; then

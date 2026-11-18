@@ -27,7 +27,7 @@ from inference import write_predictions
 from augment import TrainAugment
 from checkpointing import ResumeCheckpoint, PlannedTrainingStop, ResumeAudit, TrainingProgress, remove_resume_checkpoints, resume_path, restore_best_epoch
 import runtime
-from autocheckout.io import save_json
+from autocheckout.io import load_json, save_json
 from autocheckout.runinfo import RunInfo
 
 # from transformers import AutoImageProcessor
@@ -221,6 +221,9 @@ def get_args_parser():
     parser.add_argument('--prev_ckpt', default='', type=str,
                         help='F8: task_final.pth to start from when --start_task > 1 comes from another run')
     parser.add_argument('--accelerator', default='gpu', type=str, help="Lightning accelerator ('gpu' or 'cpu')")
+    parser.add_argument('--wandb_project', default=os.environ.get('AC_WANDB_PROJECT', ''), type=str,
+                        help='W1: also log loss/AP live to this W&B project (needs `pip install wandb` and '
+                             'WANDB_API_KEY); default $AC_WANDB_PROJECT, empty = CSV log only')
     parser.add_argument('--eff_batch_size', default=32, type=int,
                         help='Effective batch size; gradients are accumulated to reach it (original: 32)')
     parser.add_argument('--tf32', default=0, type=int,
@@ -360,7 +363,32 @@ def make_pl_trainer(args):
                                  TrainingProgress(args.output_dir),
                                  ResumeCheckpoint(args.output_dir, args.ckpt_every_minutes, args.stop_after_steps)],
                       log_every_n_steps=args.print_freq, num_sanity_val_steps=0,
-                      logger=CSVLogger(save_dir=args.output_dir, name="lightning_logs"))
+                      logger=make_loggers(args))
+
+def make_loggers(args):
+    """CSV log in the task folder, plus W&B when --wandb_project is set (W1).
+
+    The W&B run id is kept in <task>/wandb_run.json so a resumed session continues the same run. Only
+    plain values of args go to the W&B config; model weights are never uploaded (log_model=False).
+    """
+    loggers = [CSVLogger(save_dir=args.output_dir, name="lightning_logs")]
+    if not args.wandb_project:
+        return loggers
+    try:
+        import wandb
+        from lightning.pytorch.loggers import WandbLogger
+    except ImportError:
+        raise SystemExit('--wandb_project / AC_WANDB_PROJECT is set: pip install wandb (or unset it)')
+    id_file = os.path.join(args.output_dir, 'wandb_run.json')
+    group = Path(args.output_dir).resolve().parent.name
+    run = load_json(id_file) if os.path.exists(id_file) else dict(
+        id=wandb.util.generate_id(), project=args.wandb_project, group=group, name=f'{group}/task_{args.task}')
+    save_json(id_file, run, indent=2)
+    config = {k: v for k, v in vars(args).items()
+              if not k.startswith('_') and isinstance(v, (str, int, float, bool, type(None)))}
+    loggers.append(WandbLogger(project=run['project'], id=run['id'], resume='allow', name=run['name'],
+                               group=run['group'], save_dir=args.output_dir, config=config, log_model=False))
+    return loggers
 
 def write_task_predictions(args, trainer, task_id, processor):
     """F9/V1: predictions of the task's final model on the full files of --pred_splits (pred_<split>.npz)."""
