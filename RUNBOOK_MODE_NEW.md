@@ -124,7 +124,9 @@ tmux new -s vn25          # Ctrl+B rồi D để thoát ra; tmux attach -t vn25 
 cd /workspace/AutoCheckout-CL && source /workspace/venv-pdp/bin/activate
 export AC_DATA=/workspace/autocheckout-data CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST=8.9
 export AC_WANDB_PROJECT=autocheckout WANDB_API_KEY=<key W&B>
-export RCLONE_REMOTE='gdrive,root_folder_id=14eR9fnA2Uu4TAhHVdKBnPyFA2I62Pn3t:AN/ket_qua_gpu'
+# Upload tính vào dung lượng Drive của tài khoản upload. Từ 21/11: remote gdrive2 (tài khoản thứ hai, quyền Editor
+# thư mục nhóm) vì Drive của tài khoản gdrive đầy (lỗi 403 storageQuotaExceeded ở lần 3). Tải dữ liệu vẫn dùng gdrive.
+export RCLONE_REMOTE='gdrive2,root_folder_id=14eR9fnA2Uu4TAhHVdKBnPyFA2I62Pn3t:AN/ket_qua_gpu'
 export VAST_API_KEY=<key vast> INSTANCE_ID=<id máy>
 export AUTO_DESTROY=0 AUTO_STOP=1      # lần đầu: chỉ STOP máy để còn vào xem; tự tin rồi mới để AUTO_DESTROY=1
 bash scripts/vast_train_and_sync.sh new_vn25
