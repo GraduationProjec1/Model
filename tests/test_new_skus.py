@@ -156,3 +156,75 @@ def test_mode_new_dry_run_expands_trains_gates_and_tests_once(tmp_path):
     assert new_skus.stage_final_test(plan, confirm=True)['finished_at'] == final['finished_at']
     assert new_skus.prepare(settings) == plan
     assert np.isfinite(final['cAcc_m2'])
+
+
+# --- option A of AN/task6/08 (replay RPC images in the new task) --------------------------------------------------
+def replay_source():
+    """r4's training file in small: image 1 twice (oversampled), images under real/ and v2/, labels 0 and 1."""
+    images = [{'id': 1, 'file_name': 'real/val2019/a.jpg'}, {'id': 2, 'file_name': 'real/val2019/a.jpg'},
+              {'id': 3, 'file_name': 'real/val2019/b.jpg'}, {'id': 4, 'file_name': 'v2/task_1/c.jpg'},
+              {'id': 5, 'file_name': 'v2/task_1/d.jpg'}]
+    anns = [(1, 0), (2, 0), (3, 1), (4, 0), (4, 1), (5, 1)]
+    return {'images': images, 'categories': [{'id': 0, 'name': '0'}, {'id': 1, 'name': '1'}],
+            'annotations': [{'id': k, 'image_id': i, 'category_id': c, 'bbox': xywh(A), 'area': 400, 'iscrowd': 0}
+                            for k, (i, c) in enumerate(anns, start=1)]}
+
+
+def test_replay_images_dedups_takes_each_part_and_refuses_leaks():
+    chosen = new_skus.replay_images(replay_source(), {'real': 2, 'v2': 1}, min_per_class=1, learned=2,
+                                    exclude=set(), seed=0)
+    names = sorted(i['file_name'] for i in chosen['images'])
+    assert len(names) == 3 and len(set(names)) == 3  # the oversampled image once
+    assert sum(n.startswith('real/') for n in names) == 2 and sum(n.startswith('v2/') for n in names) == 1
+    with pytest.raises(ValueError, match='Val-B'):
+        new_skus.replay_images(replay_source(), {'real': 2}, min_per_class=1, learned=2, exclude={'b.jpg'}, seed=0)
+    with pytest.raises(ValueError, match='learned'):
+        new_skus.replay_images(replay_source(), {'real': 2}, min_per_class=1, learned=1, exclude=set(), seed=0)
+    with pytest.raises(ValueError, match='only 2'):
+        new_skus.replay_images(replay_source(), {'v2': 3}, min_per_class=1, learned=2, exclude=set(), seed=0)
+
+
+def test_with_replay_renumbers_after_the_new_products():
+    train = {'images': [{'id': 7, 'file_name': 'synth_new/x.jpg'}], 'categories': [{'id': 2, 'name': 'new'}],
+             'annotations': [{'id': 9, 'image_id': 7, 'category_id': 2, 'bbox': xywh(C), 'area': 400, 'iscrowd': 0}]}
+    merged = new_skus._with_replay(train, replay_source())
+    assert [i['id'] for i in merged['images']] == [7, 8, 9, 10, 11, 12]
+    assert len({a['id'] for a in merged['annotations']}) == 7 and min(a['id'] for a in merged['annotations'][1:]) > 9
+    replayed = [i for i in merged['images'] if i.get('replay')]
+    assert len(replayed) == 5 and replayed[0]['orig_id'] == 1
+    assert {c['id'] for c in merged['categories']} == {0, 1, 2}
+
+
+def test_new_label_taking_old_objects():
+    # Val-B image 4: the new label D does not cover an old object; add one on B above the old label's score
+    preds = predictions(True)
+    assert new_skus.taken_by_new_label(val_full(), preds, [3, 4], old_seen=2)['taken'] == 0
+    more = Predictions(image_id=[*preds.image_id, 3], query=[*preds.query, 5], label=[*preds.label, 2],
+                       score=[*preds.score, .9], boxes=[*preds.boxes, B])
+    r = new_skus.taken_by_new_label(val_full(), more, [3, 4], old_seen=2)
+    assert (r['objects'], r['taken'], r['rate']) == (4, 1, 0.25)
+
+
+@pytest.mark.slow
+def test_mode_new_dry_run_with_replay_trains_on_old_and_new_labels(tmp_path):
+    from autocheckout import full_syn, update_model
+    base = dict(round=1, artifact_root=str(tmp_path), dry_run=True, batch_size=1, effective_batch=2,
+                resolution=640, fsa_epochs=8, epochs=16, audit_images=4)
+    seed = full_syn.prepare({**base, 'campaign_id': 'seed'})
+    for stage in (full_syn.stage_fsa, full_syn.stage_task1, full_syn.stage_tasks):
+        stage(seed)
+    settings = dict(campaign_id='new-replay', round=1, artifact_root=str(tmp_path), dry_run=True,
+                    seed_campaign=str(tmp_path / 'dry_run/seed'),
+                    replay={'parts': {'': 2}, 'min_per_class': 1, 'seed': 0})
+    path = tmp_path / 'settings.json'
+    path.write_text(json.dumps(settings))
+    plan = update_model.main(['--mode', 'new', '--settings', str(path), '--stage', 'data'])
+    train = json.loads((Path(plan['task_dir']) / 'train_task_6.json').read_text())
+    labels = {a['category_id'] for a in train['annotations']}
+    assert labels & set(range(6)) and 6 in labels  # old labels from the replay, the new label from the package
+    assert plan['replay']['images'] == 2 and plan['train_images'] == len(train['images'])
+    assert plan['synth_root'].endswith('inputs/train_images')
+    assert all((Path(plan['synth_root']) / i['file_name']).is_file() for i in train['images'])
+    pilot = update_model.main(['--mode', 'new', '--settings', str(path), '--stage', 'pilot'])
+    assert pilot['train_images'] == plan['pilot_images'] and 'taken_by_new_label' in pilot['old']
+    assert new_skus.prepare(settings) == plan

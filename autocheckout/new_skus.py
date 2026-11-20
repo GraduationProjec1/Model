@@ -111,6 +111,32 @@ def cross_counts(coco_new: dict, preds: Predictions, vector: np.ndarray, old_see
             'old_label_detections': n_old, 'old_label_detections_per_image': n_old / len(ids) if ids else 0.0}
 
 
+def taken_by_new_label(coco_full: dict, preds: Predictions, ids: list[int], old_seen: int) -> dict[str, Any]:
+    """Old objects of ``ids`` whose best box (highest score among the top-1-per-query rows with IoU >= MATCH_IOU,
+    before the NMS) has a new label: the new label then wins the class-agnostic NMS and the old object goes uncounted
+    (run 1 of task 6: 19.9 % of Val-B objects, AN/task6/08). Diagnostic only, not a gate."""
+    from autocheckout.cl_metrics import box_iou
+
+    wanted = set(ids)
+    rows = preds.subset(np.isin(preds.image_id, ids)).top1_per_query()
+    gt: dict[int, list[list[float]]] = {}
+    for a in coco_full['annotations']:
+        if a['image_id'] in wanted and a['category_id'] < old_seen:
+            x, y, w, h = a['bbox']
+            gt.setdefault(a['image_id'], []).append([x, y, x + w, y + h])
+    objects = taken = 0
+    for image_id, boxes in gt.items():
+        mine = rows.image_id == image_id
+        objects += len(boxes)
+        if not mine.any():
+            continue
+        iou = box_iou(np.array(boxes, dtype=np.float64), rows.boxes[mine])
+        scores = np.where(iou >= MATCH_IOU, rows.score[mine][None, :], -np.inf)
+        covered = np.isfinite(scores).any(axis=1)
+        taken += int((covered & (rows.label[mine][scores.argmax(axis=1)] >= old_seen)).sum())
+    return {'objects': objects, 'taken': taken, 'rate': taken / objects if objects else 0.0}
+
+
 def score_stage(val_full: dict, cfg: TaskConfig, preds: Predictions, *, stage: int, old_stage: int,
                 calib: list[int], val_b: list[int], new_val: list[int]) -> dict[str, Any]:
     """Scores of a model that has learned up to ``stage`` (``old_stage``: the seed; ``old_stage + 1``: with the new
@@ -144,6 +170,7 @@ def score_stage(val_full: dict, cfg: TaskConfig, preds: Predictions, *, stage: i
               'new': {'images': len(new_val),
                       **cross_counts(new_coco, preds, _vector(groups, thresholds, cfg.num_classes), old_seen)}}
     if stage > old_stage:
+        report['old']['taken_by_new_label'] = taken_by_new_label(val_full, preds, val_b, old_seen)
         coco_new = load_coco(new_coco)
         all_labels = count_on(val_full, cfg, preds, new_val, thresholds, groups=groups)
         filtered = count_on(val_full, cfg, preds, new_val, thresholds[-1:], groups=groups[-1:])
@@ -229,6 +256,49 @@ def _merge(base: dict, extra: dict) -> dict:
     return {**base, 'images': base['images'] + extra['images'],
             'annotations': base['annotations'] + extra['annotations'],
             'categories': base['categories'] + [c for c in extra['categories'] if c['id'] not in known]}
+
+
+def replay_images(source: dict, parts: dict[str, int], *, min_per_class: int, learned: int, exclude: set[str],
+                  seed: int) -> dict:
+    """Option A of AN/task6/08: RPC images replayed in the new task so that the new rows see old products as
+    negatives. From ``source`` (the seed's training file, its oversampled images once), ``parts[prefix]`` images whose
+    file name starts with ``prefix`` (feedback_fix.select_replay: each old class first up to ``min_per_class``
+    objects). Refused: a file name (last part) in ``exclude`` (Val-B, calib, the new product photos) or a label the
+    seed has not learned."""
+    from autocheckout.feedback_fix import select_replay, subset
+
+    first: dict[str, int] = {}
+    for image in source['images']:
+        first.setdefault(image['file_name'], image['id'])
+    leaked = sorted({name.rsplit('/', 1)[-1] for name in first} & exclude)
+    if leaked:
+        raise ValueError(f'{len(leaked)} replay images are Val-B, calib or new-product photos, e.g. {leaked[:3]}')
+    unique = subset(source, sorted(first.values()))
+    if any(a['category_id'] >= learned for a in unique['annotations']):
+        raise ValueError(f'replay labels must be classes the seed learned (< {learned})')
+    chosen: list[int] = []
+    for k, (prefix, n) in enumerate(sorted(parts.items())):
+        part = subset(unique, [i['id'] for i in unique['images'] if i['file_name'].startswith(prefix)])
+        if len(part['images']) < n:
+            raise ValueError(f'replay part {prefix!r}: only {len(part["images"])} images, {n} wanted')
+        chosen += [i['id'] for i in select_replay(part, [], n, min_per_class, range(learned), seed + k)['images']]
+    return subset(unique, chosen)
+
+
+def _with_replay(train: dict, replay: dict) -> dict:
+    """The new task's training file followed by the replay images, renumbered after its largest ids (``orig_id``
+    keeps the seed's id, ``replay`` marks them)."""
+    image_base = max(i['id'] for i in train['images'])
+    ann_base = max((a['id'] for a in train['annotations']), default=0)
+    new_id = {image['id']: image_base + k for k, image in enumerate(replay['images'], start=1)}
+    known = {c['id'] for c in train['categories']}
+    return {**train,
+            'images': train['images'] + [{**i, 'id': new_id[i['id']], 'orig_id': i['id'], 'replay': True}
+                                         for i in replay['images']],
+            'annotations': train['annotations'] + [{**a, 'id': ann_base + k, 'image_id': new_id[a['image_id']]}
+                                                   for k, a in enumerate(replay['annotations'], start=1)],
+            'categories': sorted([*train['categories'], *(c for c in replay['categories'] if c['id'] not in known)],
+                                 key=lambda c: c['id'])}
 
 
 def _link_images(target: Path, sources: list[tuple[dict, Path]]) -> None:
@@ -321,6 +391,27 @@ def prepare(settings: dict) -> dict:
     pick = sorted(np.random.default_rng(0).choice(len(train['images']), min(PILOT_IMAGES, len(train['images'])),
                                                   replace=False).tolist())
     pilot_ids = {train['images'][k]['id'] for k in pick}
+    replay, replay_plan = settings.get('replay'), {}
+    if replay:  # option A of AN/task6/08: RPC images of the seed's training file in the new task
+        source = root / 'fixture/toy/tasks/train_full.json' if dry else data / replay['source']
+        names = {i['id']: i['file_name'].rsplit('/', 1)[-1] for i in val_full['images']}
+        exclude = {names[i] for i in [*val_b, *split['calib']]} | {
+            i['file_name'].rsplit('/', 1)[-1] for s in ('val', 'test') for i in files[s]['images']}
+        chosen = replay_images(load_json(source), replay['parts'], min_per_class=int(replay['min_per_class']),
+                               learned=base.seen_classes(old_stage), exclude=exclude, seed=int(replay.get('seed', 0)))
+        train_root, synth_root = synth_root, inputs / 'train_images'
+        _link_images(synth_root, [(files['train'], train_root), (chosen, raw)])
+        missing = [i['file_name'] for i in chosen['images'] if not (synth_root / i['file_name']).is_file()]
+        if missing:
+            raise FileNotFoundError(f'replay: {len(missing)} images missing, e.g. {missing[:3]}')
+        train = _with_replay(train, chosen)
+        replayed = [i['id'] for i in train['images'] if i.get('replay')]
+        pick = np.random.default_rng(1).choice(len(replayed), min(PILOT_IMAGES, len(replayed)), replace=False)
+        pilot_ids |= {replayed[k] for k in pick.tolist()}
+        per_class = np.bincount([a['category_id'] for a in chosen['annotations']],
+                                minlength=base.seen_classes(old_stage))
+        replay_plan = {'replay': {**replay, 'source_sha256': sha256_file(source), 'images': len(chosen['images']),
+                                  'objects': len(chosen['annotations']), 'least_objects_per_class': int(per_class.min())}}
     written = {
         f'train_task_{new_task}.json': train,
         f'train_task_{new_task}_pilot.json': {
@@ -350,7 +441,7 @@ def prepare(settings: dict) -> dict:
         old_stage=old_stage, new_task=new_task, learned=base.seen_classes(old_stage), n_classes=cfg.num_classes,
         new_labels=sorted(new_labels), hyperparameters=HYPERPARAMETERS, gate=GATE, pilot_images=len(pilot_ids),
         train_images=len(train['images']), task_config_sha256=sha256_file(inputs / 'task_config.json'),
-        release_config_sha256=None,
+        release_config_sha256=None, **replay_plan,
         input_sha256={**{name: sha256_file(task_dir / name) for name in sorted(written)},
                       'splits.json': sha256_file(inputs / 'splits.json'),
                       'products.json': sha256_file(package / 'products.json')})
