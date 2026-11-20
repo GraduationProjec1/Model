@@ -392,6 +392,11 @@ def prepare(settings: dict) -> dict:
     pick = sorted(np.random.default_rng(0).choice(len(train['images']), min(PILOT_IMAGES, len(train['images'])),
                                                   replace=False).tolist())
     pilot_ids = {train['images'][k]['id'] for k in pick}
+    # run 3 of task 6 (AN/task6/09): settings 'hyperparameters' override keys of both variants (e.g. lr_old 0)
+    override = settings.get('hyperparameters') or {}
+    if set(override) - set(HYPERPARAMETERS['task']):
+        raise ValueError(f"unknown hyperparameters {sorted(set(override) - set(HYPERPARAMETERS['task']))}")
+    hyperparameters = {v: {**hp, **override} for v, hp in HYPERPARAMETERS.items()}
     replay, replay_plan = settings.get('replay'), {}
     if replay:  # option A of AN/task6/08: RPC images of the seed's training file in the new task
         source = root / 'fixture/toy/tasks/train_full.json' if dry else data / replay['source']
@@ -444,7 +449,7 @@ def prepare(settings: dict) -> dict:
         seed_root=str(seed), seed_run=str(seed_run), seed_task5=str(seed5), seed_task_config=str(seed_config),
         seed=dict(campaign_id=seed_plan['campaign_id'], round=seed_plan['round'], task5_md5=seed_md5),
         old_stage=old_stage, new_task=new_task, learned=base.seen_classes(old_stage), n_classes=cfg.num_classes,
-        new_labels=sorted(new_labels), hyperparameters=HYPERPARAMETERS, gate=GATE, pilot_images=len(pilot_ids),
+        new_labels=sorted(new_labels), hyperparameters=hyperparameters, gate=GATE, pilot_images=len(pilot_ids),
         train_images=len(train['images']), task_config_sha256=sha256_file(inputs / 'task_config.json'),
         release_config_sha256=None, **replay_plan,
         input_sha256={**{name: sha256_file(task_dir / name) for name in sorted(written)},
@@ -590,12 +595,12 @@ def stage_train(plan: dict, variant: str) -> dict:
         if not link.is_symlink():
             link.symlink_to(source.resolve())
     with _attempt(plan, variant) as (record, attempt):
-        _train(plan, record, attempt, experiment, task, 'val', HYPERPARAMETERS[variant],
+        _train(plan, record, attempt, experiment, task, 'val', plan['hyperparameters'][variant],
                suffix='_pilot' if variant == 'pilot' else '')
     scores = _score(plan, run, task)
     comparison = sign_test(baseline['old']['right_images'], scores['old']['right_images'])
     decision, reason, must_filter = verdict(scores, baseline)
-    report = {'stage': variant, 'hyperparameters': HYPERPARAMETERS[variant], 'train_hours': _hours(run, task),
+    report = {'stage': variant, 'hyperparameters': plan['hyperparameters'][variant], 'train_hours': _hours(run, task),
               'train_images': plan['pilot_images'] if variant == 'pilot' else plan['train_images'], **scores,
               'comparison': comparison, 'shop_must_filter_labels': must_filter}
     gate = None

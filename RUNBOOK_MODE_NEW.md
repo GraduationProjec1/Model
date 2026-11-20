@@ -205,3 +205,14 @@ bash scripts/vast_train_and_sync.sh new_vn25_replay
 Đọc thêm trong `stages/pilot.json` và `task.json`: `old.taken_by_new_label.rate` (lần 1: 0,199; r4: 0). Đây là chỉ số
 chẩn đoán, không phải cổng. Nếu pilot vẫn cho tỉ lệ này cao hoặc ngưỡng task cũ tụt về 0,10 thì dừng trước khi chạy
 task.
+
+### Lần 3: replay + `lr_old = 0` (`new_vn25_replay_lr0`)
+
+Lần 2 STOP sát nút: Val-B cAcc-M2 0,6828 → 0,6555 (chỉ nhãn cũ 0,6679), AP50 VN 0,940, vật RPC bị nhãn VN chiếm 0,45%.
+Ngưỡng task cũ tụt về 0,15–0,25 do phần dùng chung vẫn học với `lr_old 1e-5`. Lần 3 (campaign `new-vn25-replay-lr0`)
+giống lần 2, thêm `"hyperparameters": {"lr_old": 0}` trong settings (ghi đè cho pilot và task). Lệnh như mục 9, thay tên:
+
+```bash
+python -m autocheckout.update_model --mode new --settings configs/training/update_model_new_vn25_replay_lr0.json --stage data
+bash scripts/vast_train_and_sync.sh new_vn25_replay_lr0
+```

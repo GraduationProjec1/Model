@@ -215,7 +215,7 @@ def test_mode_new_dry_run_with_replay_trains_on_old_and_new_labels(tmp_path):
         stage(seed)
     settings = dict(campaign_id='new-replay', round=1, artifact_root=str(tmp_path), dry_run=True,
                     seed_campaign=str(tmp_path / 'dry_run/seed'),
-                    replay={'parts': {'': 2}, 'min_per_class': 1, 'seed': 0})
+                    replay={'parts': {'': 2}, 'min_per_class': 1, 'seed': 0}, hyperparameters={'lr_old': 0})
     path = tmp_path / 'settings.json'
     path.write_text(json.dumps(settings))
     plan = update_model.main(['--mode', 'new', '--settings', str(path), '--stage', 'data'])
@@ -227,6 +227,11 @@ def test_mode_new_dry_run_with_replay_trains_on_old_and_new_labels(tmp_path):
     assert all((Path(plan['synth_root']) / i['file_name']).is_file() for i in train['images'])
     pilot = update_model.main(['--mode', 'new', '--settings', str(path), '--stage', 'pilot'])
     assert pilot['train_images'] == plan['pilot_images'] and 'taken_by_new_label' in pilot['old']
+    assert plan['hyperparameters']['task']['lr_old'] == 0 and pilot['hyperparameters']['lr_old'] == 0
+    cli = json.loads((Path(plan['runs']) / 'EXP-NEW-pilot/resolved_cli.json').read_text())['arguments']
+    assert cli[len(cli) - 1 - cli[::-1].index('--lr_old') + 1] == '0'  # the last --lr_old wins
+    with pytest.raises(ValueError, match='unknown'):
+        new_skus.prepare({**settings, 'campaign_id': 'bad', 'hyperparameters': {'lr_olds': 0}})
     assert new_skus.prepare(settings) == plan
 
 
