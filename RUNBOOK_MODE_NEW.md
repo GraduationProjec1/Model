@@ -71,6 +71,20 @@ pip install -q wandb==0.18.7
 
 ## 3. Dữ liệu (30–60 phút, phần lớn là tải 32 GB)
 
+**Từ 21/11 dùng gói gọn (khoảng 5 phút), thay cho cả mục 3.1–3.4 và phần tải thêm ở mục 9.**
+`AN/data/autocheckout-data-mode-new_20261121.tar` (7,2 GB, md5 `cd51bcb12aa4f6b15304aefa1e1780ad`, 17.685 file có
+SHA256SUMS bên trong) gồm đúng phần mode new đọc: eval/, rpc/val2019, pretrained/, models/full-syn-r1 (plan + FSA
+hf_model), models/al-r4 (task_5 + train_task_5_fix.json), relearn/active + meta, ảnh replay `v2/` và `relearn/` của tập
+train r4, new_products/vn25. Đã kiểm 21/11: baseline trên gói gọn trùng từng số với lần 3, tải ngược + `sha256sum -c`
+qua. Không đủ cho train FULL-SYN/AL lại từ đầu hay chấm test RPC: khi đó dùng tar 32 GB như mục 3.1.
+
+```bash
+rclone cat "${DRIVE}AN/data/autocheckout-data-mode-new_20261121.tar" | tar -x -C /workspace
+(cd /workspace/autocheckout-data && sha256sum -c --quiet SHA256SUMS && echo "GÓI GỌN NGUYÊN VẸN")
+```
+
+Cách cũ (gói đầy đủ):
+
 ```bash
 DRIVE='gdrive,root_folder_id=14eR9fnA2Uu4TAhHVdKBnPyFA2I62Pn3t:'
 DATA=/workspace/autocheckout-data
