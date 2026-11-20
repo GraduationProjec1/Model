@@ -12,6 +12,16 @@ DRIVE='gdrive,root_folder_id=14eR9fnA2Uu4TAhHVdKBnPyFA2I62Pn3t:'
 
 ## 0. Trên Mac (trước khi thuê máy)
 
+**0.0 rclone phải có quyền ghi.** Remote `gdrive` tạo với `scope = drive.readonly` chỉ tải về được: upload ở 0.1 và
+upload kết quả từ máy GPU sẽ báo `insufficientPermissions`. Kiểm và cấp lại quyền (mở trình duyệt đăng nhập Google):
+
+```bash
+grep -A3 '^\[gdrive\]' ~/.config/rclone/rclone.conf | grep scope   # cần: scope = drive
+rclone config update gdrive scope drive && rclone config reconnect gdrive:
+```
+
+File upload vào thư mục chung tính vào dung lượng Drive **của người upload**: gói VN 1,2 GB + kết quả khoảng 2–3 GB.
+
 **0.1 Upload gói dữ liệu VN** (1,21 GB) vào `AN/new_products/` trên Drive chung:
 
 ```bash
