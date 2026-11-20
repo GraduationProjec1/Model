@@ -228,3 +228,14 @@ def test_mode_new_dry_run_with_replay_trains_on_old_and_new_labels(tmp_path):
     pilot = update_model.main(['--mode', 'new', '--settings', str(path), '--stage', 'pilot'])
     assert pilot['train_images'] == plan['pilot_images'] and 'taken_by_new_label' in pilot['old']
     assert new_skus.prepare(settings) == plan
+
+
+def test_link_images_named_folders(tmp_path):
+    (tmp_path / 'rpc/val2019').mkdir(parents=True)
+    (tmp_path / 'pkg/synth_new').mkdir(parents=True)
+    coco = {'images': [{'file_name': 'synth_new/1.jpg'}]}
+    new_skus._link_images(tmp_path / 'train', [(coco, tmp_path / 'pkg')], named={'real': tmp_path / 'rpc'})
+    assert (tmp_path / 'train/real/val2019').resolve() == (tmp_path / 'rpc/val2019').resolve()
+    assert (tmp_path / 'train/synth_new').resolve() == (tmp_path / 'pkg/synth_new').resolve()
+    with pytest.raises(ValueError, match='both'):
+        new_skus._link_images(tmp_path / 'x', [(coco, tmp_path / 'pkg')], named={'synth_new': tmp_path / 'rpc'})

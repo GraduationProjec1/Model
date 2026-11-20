@@ -301,9 +301,10 @@ def _with_replay(train: dict, replay: dict) -> dict:
                                  key=lambda c: c['id'])}
 
 
-def _link_images(target: Path, sources: list[tuple[dict, Path]]) -> None:
-    """One image folder for the prediction pass: the first path part of every file name linked to its folder."""
-    links: dict[str, Path] = {}
+def _link_images(target: Path, sources: list[tuple[dict, Path]], named: dict[str, Path] | None = None) -> None:
+    """One image folder for the prediction pass: the first path part of every file name linked to its folder
+    (``named``: first path parts linked to given folders, e.g. the replay's real/ -> rpc)."""
+    links: dict[str, Path] = {name: Path(folder).resolve() for name, folder in (named or {}).items()}
     for coco, root in sources:
         for image in coco['images']:
             name = image['file_name'].split('/')[0]
@@ -400,7 +401,11 @@ def prepare(settings: dict) -> dict:
         chosen = replay_images(load_json(source), replay['parts'], min_per_class=int(replay['min_per_class']),
                                learned=base.seen_classes(old_stage), exclude=exclude, seed=int(replay.get('seed', 0)))
         train_root, synth_root = synth_root, inputs / 'train_images'
-        _link_images(synth_root, [(files['train'], train_root), (chosen, raw)])
+        if replay.get('roots'):  # first path part -> folder under the data root (real/ -> rpc, v2/ -> synth_v2/images)
+            _link_images(synth_root, [(files['train'], train_root)],
+                         named={name: data / folder for name, folder in replay['roots'].items()})
+        else:
+            _link_images(synth_root, [(files['train'], train_root), (chosen, raw)])
         missing = [i['file_name'] for i in chosen['images'] if not (synth_root / i['file_name']).is_file()]
         if missing:
             raise FileNotFoundError(f'replay: {len(missing)} images missing, e.g. {missing[:3]}')

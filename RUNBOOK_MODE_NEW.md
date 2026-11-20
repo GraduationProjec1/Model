@@ -189,7 +189,7 @@ Thêm vào bước 3 (cùng máy với lần 1 thì chỉ cần mục này):
 ```bash
 R4IN="${DRIVE}ket_qua_gpu/al_r4_20261114_165406/update-model/relearn-fix-v2/inputs/al_margin_k_B500_r4"
 rclone copyto "$R4IN/train_task_5_fix.json" $DATA/models/al-r4/train_task_5_fix.json
-ls $DATA/rpc/real/val2019 | head -2; ls $DATA/rpc/v2 | head -2   # ảnh replay đọc từ rpc/real và rpc/v2
+# ảnh replay: real/<x> nằm ở rpc/<x>, v2/<x> ở synth_v2/images/<x> (settings replay.roots); relearn/images thiếu 128 ảnh
 ```
 
 Bước 4 và 5 như trên, thay settings và tên task:

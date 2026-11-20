@@ -12,8 +12,15 @@
   "config_name": "100-4x25_seed0+vn25",
   "replay": {
     "source": "models/al-r4/train_task_5_fix.json",
-    "parts": {"real/": 1000, "v2/": 1000},
+    "parts": {
+      "real/": 1000,
+      "v2/": 1000
+    },
     "min_per_class": 40,
-    "seed": 0
+    "seed": 0,
+    "roots": {
+      "real": "rpc",
+      "v2": "synth_v2/images"
+    }
   }
 }
