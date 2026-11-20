@@ -166,6 +166,16 @@ def test_count_matrix_matches_a_plain_loop_on_random_rows():
     np.testing.assert_array_equal(count_matrix(preds, image_ids, labels, 0.3), expected)
 
 
+def test_count_matrix_ignores_labels_past_the_per_label_thresholds():
+    """Mode new: the old groups are counted while the model also reports a later task's labels (8 here)."""
+    from autocheckout.counting import count_matrix, label_thresholds
+
+    preds = Predictions(image_id=[1, 1, 1], query=[0, 1, 2], label=[0, 1, 8], score=[0.9, 0.2, 0.9],
+                        boxes=np.zeros((3, 4)))
+    vector = label_thresholds([[0], [1]], [0.5, 0.1])  # size 2: label 8 has no threshold
+    np.testing.assert_array_equal(count_matrix(preds, [1], [0, 1], vector), [[1, 1]])
+
+
 def test_dedup_detections_keeps_the_best_row_per_object_across_classes_within_an_image():
     preds = Predictions(
         image_id=[1, 1, 1, 2, 1], query=[0, 1, 2, 0, 3], label=[0, 1, 0, 0, 2],

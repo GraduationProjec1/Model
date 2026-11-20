@@ -129,7 +129,13 @@ def count_matrix(
     labels_arr = np.asarray(labels, dtype=np.int64)
     image_order = np.argsort(image_ids_arr)
     label_order = np.argsort(labels_arr)
-    keep = top1.score >= (np.asarray(threshold)[top1.label] if np.ndim(threshold) else threshold)
+    if np.ndim(threshold):
+        # labels past the array (a later task's, not in ``labels``) are dropped below anyway: never counted
+        vector = np.asarray(threshold)
+        inside = top1.label < len(vector)
+        keep = inside & (top1.score >= vector[np.where(inside, top1.label, 0)])
+    else:
+        keep = top1.score >= threshold
     rows_img, rows_label = top1.image_id[keep], top1.label[keep].astype(np.int64)
     # position of each row's image / label in the requested lists; rows not in the lists are dropped
     i = np.clip(np.searchsorted(image_ids_arr, rows_img, sorter=image_order), 0, len(image_ids_arr) - 1)
