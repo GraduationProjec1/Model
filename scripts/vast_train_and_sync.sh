@@ -37,6 +37,7 @@ INSTANCE_ID="${INSTANCE_ID:-}"
 #   - "relearn_pilot": Chạy học lại pilot (17 SKU)
 #   - "relearn_e1": Chạy học lại E1 (63 SKU)
 #   - "naive": Chạy fine-tune thẳng (baseline B2)
+#   - "new_vn25": mode new, 25 sản phẩm VN ở task 6 từ model AL vòng 4 (RUNBOOK_MODE_NEW.md)
 TASK="${1:-${TASK:-al_dot1}}"
 
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
@@ -298,6 +299,35 @@ case "$TASK" in
         if [[ "${R4_FREEZE:-0}" == "1" ]]; then
             echo ">> B3: al_margin_k_B500_r3_freeze (lr_old 0, dữ liệu của real, ~2,7 giờ)..." | tee -a "$MAIN_LOG"
             step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
+        fi
+        ;;
+    new_vn25)
+        # Mode new (docs/project/mode-new-2026-11-20.md, RUNBOOK_MODE_NEW.md): 25 sản phẩm VN ở task 6 từ model AL vòng 4.
+        # data (không GPU) -> task (tự chạy expand, baseline, pilot rồi task) -> test ảnh quầy VN một lần nếu cổng go
+        # (FINAL_TEST=0 để tự chấm sau). Thiếu đầu vào thì dừng trước khi tốn GPU.
+        SETTINGS_NEW=configs/training/update_model_new_vn25.json
+        CAMP="$REPO_DIR/data/training/update-model/new-vn25"
+        NEED=("$DATA_DIR/models/al-r4/task_5/task_final.pth" "$DATA_DIR/models/al-r4/task_5/pred_val.npz"
+              "$DATA_DIR/models/full-syn-r1/plan.json"
+              "$DATA_DIR/models/full-syn-r1/runs/EXP-FULL-SYN-FSA/task_1/hf_model/config.json"
+              "$DATA_DIR/eval/task_config.json" "$DATA_DIR/eval/val_full.json"
+              "$DATA_DIR/relearn/active/splits/val_a_split.json" "$DATA_DIR/new_products/vn25/products.json"
+              "$DATA_DIR/new_products/vn25/tasks_ac/task6/train_task_6.json")
+        for f in "${NEED[@]}"; do
+            [[ -f "$f" ]] || { echo "[THIẾU] $f -> xem RUNBOOK_MODE_NEW.md bước 3" | tee -a "$MAIN_LOG"; exit 3; }
+        done
+        echo ">> Mode new: dựng campaign (data), rồi expand -> baseline -> pilot -> task 6 (~vài giờ 4090)..." | tee -a "$MAIN_LOG"
+        step new_data python -m autocheckout.update_model --mode new --settings "$SETTINGS_NEW" --stage data
+        [[ ${#FAILED_STEPS[@]} -eq 0 ]] && \
+            step new_task python -m autocheckout.update_model --mode new --settings "$SETTINGS_NEW" --stage task
+        if [[ ${#FAILED_STEPS[@]} -eq 0 && "${FINAL_TEST:-1}" == "1" ]]; then
+            if python -c "import json, sys; sys.exit(json.load(open('$CAMP/stages/task.json'))['gate']['decision'] != 'go')"; then
+                echo ">> Cổng go: chấm 112 ảnh test quầy VN (một lần)..." | tee -a "$MAIN_LOG"
+                step new_test python -m autocheckout.update_model --mode new --settings "$SETTINGS_NEW" \
+                    --stage final_test --confirm-test
+            else
+                echo "[CỔNG] task 6 STOP: không chấm test; xem $CAMP/stages/task.json" | tee -a "$MAIN_LOG"
+            fi
         fi
         ;;
     al_dot2)
