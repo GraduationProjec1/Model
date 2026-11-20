@@ -58,7 +58,7 @@ for t in $(seq "${START_TASK:-1}" "$N_TASKS"); do
     else
         echo "-- task $t: training ($(date '+%F %T'))"
     fi
-    (cd "$REPO/pdp" && $PYTHON main.py "${ARGS[@]}" --output_dir "$RUN_DIR" --start_task "$t" --n_tasks "$t" \
+    (cd "$REPO/pdp" && "$PYTHON" main.py "${ARGS[@]}" --output_dir "$RUN_DIR" --start_task "$t" --n_tasks "$t" \
         --pred_splits "$PRED_SPLITS" "${mode[@]+"${mode[@]}"}")
 done
 
@@ -69,7 +69,7 @@ fi
 echo "-- evaluation ($(date '+%F %T'))"
 cd "$REPO"
 for split in val test; do
-    $PYTHON -m tools.eval_cl --run-dir "$RUN_DIR" --split "$split" --ann "$TASK_DIR/${split}_full.json" \
+    "$PYTHON" -m tools.eval_cl --run-dir "$RUN_DIR" --split "$split" --ann "$TASK_DIR/${split}_full.json" \
         --task-config "$TASK_CFG" > "$RUN_DIR/metrics_cl_$split.md"
 done
 if [[ ${EVAL_MODE:-legacy} == calibrated ]]; then
@@ -79,18 +79,18 @@ if [[ ${EVAL_MODE:-legacy} == calibrated ]]; then
         if [[ -n ${COUNT_THRESHOLD_GRID:-} ]]; then
             calibration_args+=(--threshold-grid "$COUNT_THRESHOLD_GRID")
         fi
-        $PYTHON -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
+        "$PYTHON" -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
             --task-config "$TASK_CFG" --calibrate-only --policy-out "$policy" "${calibration_args[@]}" \
             > "$RUN_DIR/calibration_count.log"
     fi
-    $PYTHON -m tools.eval_count --run-dir "$RUN_DIR" --test-ann "$TASK_DIR/test_full.json" \
+    "$PYTHON" -m tools.eval_count --run-dir "$RUN_DIR" --test-ann "$TASK_DIR/test_full.json" \
         --task-config "$TASK_CFG" --policy-in "$policy" > "$RUN_DIR/metrics_count_test.md"
     echo "== $EXP finished ($(date '+%F %T'))"
     exit 0
 fi
-$PYTHON -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
+"$PYTHON" -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
     --test-ann "$TASK_DIR/test_full.json" --task-config "$TASK_CFG" > "$RUN_DIR/metrics_count_test.md"
 # Also with one detection per object (class-agnostic NMS, see tools/eval_count.py): both are reported.
-$PYTHON -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
+"$PYTHON" -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
     --test-ann "$TASK_DIR/test_full.json" --task-config "$TASK_CFG" --nms-iou 0.5 > "$RUN_DIR/metrics_count_test_nms0.5.md"
 echo "== $EXP finished ($(date '+%F %T'))"
