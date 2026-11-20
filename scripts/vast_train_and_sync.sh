@@ -38,6 +38,7 @@ INSTANCE_ID="${INSTANCE_ID:-}"
 #   - "relearn_e1": Chạy học lại E1 (63 SKU)
 #   - "naive": Chạy fine-tune thẳng (baseline B2)
 #   - "new_vn25": mode new, 25 sản phẩm VN ở task 6 từ model AL vòng 4 (RUNBOOK_MODE_NEW.md)
+#   - "new_vn25_replay": như new_vn25, thêm 2.000 ảnh RPC replay (lần 2, RUNBOOK_MODE_NEW.md mục 8)
 TASK="${1:-${TASK:-al_dot1}}"
 
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
@@ -301,18 +302,24 @@ case "$TASK" in
             step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
         fi
         ;;
-    new_vn25)
+    new_vn25|new_vn25_replay)
         # Mode new (docs/project/mode-new-2026-11-20.md, RUNBOOK_MODE_NEW.md): 25 sản phẩm VN ở task 6 từ model AL vòng 4.
         # data (không GPU) -> task (tự chạy expand, baseline, pilot rồi task) -> test ảnh quầy VN một lần nếu cổng go
         # (FINAL_TEST=0 để tự chấm sau). Thiếu đầu vào thì dừng trước khi tốn GPU.
+        # new_vn25_replay: lần 2, trộn 2.000 ảnh RPC từ tập train của r4 (phương án A, AN/task6/08).
         SETTINGS_NEW=configs/training/update_model_new_vn25.json
         CAMP="$REPO_DIR/data/training/update-model/new-vn25"
+        if [[ "$TASK" == new_vn25_replay ]]; then
+            SETTINGS_NEW=configs/training/update_model_new_vn25_replay.json
+            CAMP="$REPO_DIR/data/training/update-model/new-vn25-replay"
+        fi
         NEED=("$DATA_DIR/models/al-r4/task_5/task_final.pth" "$DATA_DIR/models/al-r4/task_5/pred_val.npz"
               "$DATA_DIR/models/full-syn-r1/plan.json"
               "$DATA_DIR/models/full-syn-r1/runs/EXP-FULL-SYN-FSA/task_1/hf_model/config.json"
               "$DATA_DIR/eval/task_config.json" "$DATA_DIR/eval/val_full.json"
               "$DATA_DIR/relearn/active/splits/val_a_split.json" "$DATA_DIR/new_products/vn25/products.json"
               "$DATA_DIR/new_products/vn25/tasks_ac/task6/train_task_6.json")
+        [[ "$TASK" == new_vn25_replay ]] && NEED+=("$DATA_DIR/models/al-r4/train_task_5_fix.json")
         for f in "${NEED[@]}"; do
             [[ -f "$f" ]] || { echo "[THIẾU] $f -> xem RUNBOOK_MODE_NEW.md bước 3" | tee -a "$MAIN_LOG"; exit 3; }
         done

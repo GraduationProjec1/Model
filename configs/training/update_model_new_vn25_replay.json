@@ -1,0 +1,19 @@
+{
+  "campaign_id": "new-vn25-replay",
+  "round": 1,
+  "artifact_root": "data/training/update-model",
+  "dry_run": false,
+  "data_root": "../autocheckout-data",
+  "seed_run": "models/al-r4",
+  "seed_task5_md5": "64c57f9cbbd5ca056da1c50b7991b94b",
+  "new_root": "new_products/vn25",
+  "new_tasks": "tasks_ac/task6",
+  "reserve_after": 25,
+  "config_name": "100-4x25_seed0+vn25",
+  "replay": {
+    "source": "models/al-r4/train_task_5_fix.json",
+    "parts": {"real/": 1000, "v2/": 1000},
+    "min_per_class": 40,
+    "seed": 0
+  }
+}

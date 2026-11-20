@@ -174,3 +174,34 @@ Cách hiểu go/stop và bước tiếp theo ở mục 4 của tài liệu thi�
 Model task 6: `runs/EXP-NEW/task_6/task_final.pth` (+ `runtime.json`), ngưỡng đếm trong `stages/task.json` →
 `thresholds` (task_1..task_6), config `inputs/task_config.json` (251 lớp). Việc nạp vào backend (`slot_total`,
 `task_skus`, lọc nhãn khi `shop_must_filter_labels`) làm sau khi có kết quả.
+
+## 9. Lần 2: replay ảnh RPC (`new_vn25_replay`)
+
+Lần 1 (campaign `new-vn25`, 20/11) ra STOP. 25 lớp VN chỉ học trên ảnh VN nên "nhận vơ" vật RPC: 19,9% vật Val-B có
+hộp điểm cao nhất mang nhãn VN, NMS xoá nhãn đúng, cAcc-M2 Val-B 0,6828 → 0,1136. Lần 2 (campaign `new-vn25-replay`,
+`configs/training/update_model_new_vn25_replay.json`) trộn vào train task 6 **2.000 ảnh RPC từ chính tập train của r4**
+(1.000 ảnh thật `real/` + 1.000 ảnh ghép `v2/`, mỗi lớp cũ ít nhất 40 vật mỗi phần, seed 0; trên file thật: 28.261 vật,
+lớp ít nhất 82). Hàng lớp cũ vẫn khoá; nhãn RPC trong ảnh replay dạy lớp VN "đây không phải tôi" và giữ phần dùng
+chung. Code từ chối ảnh replay trùng Val-B, calib hay ảnh VN (so tên file). Cổng, val, mốc giữ nguyên.
+
+Thêm vào bước 3 (cùng máy với lần 1 thì chỉ cần mục này):
+
+```bash
+R4IN="${DRIVE}ket_qua_gpu/al_r4_20261114_165406/update-model/relearn-fix-v2/inputs/al_margin_k_B500_r4"
+rclone copyto "$R4IN/train_task_5_fix.json" $DATA/models/al-r4/train_task_5_fix.json
+ls $DATA/rpc/real/val2019 | head -2; ls $DATA/rpc/v2 | head -2   # ảnh replay đọc từ rpc/real và rpc/v2
+```
+
+Bước 4 và 5 như trên, thay settings và tên task:
+
+```bash
+python -m autocheckout.update_model --mode new --settings configs/training/update_model_new_vn25_replay.json --stage data
+bash scripts/vast_train_and_sync.sh new_vn25_replay
+```
+
+`--stage data` phải in `train 4000 images (pilot 600)`. `plan.json` có khối `replay` (`images` 2000, `objects`,
+`least_objects_per_class`). Thời gian train khoảng gấp đôi lần 1 (khoảng 1,2 giờ).
+
+Đọc thêm trong `stages/pilot.json` và `task.json`: `old.taken_by_new_label.rate` (lần 1: 0,199; r4: 0). Đây là chỉ số
+chẩn đoán, không phải cổng. Nếu pilot vẫn cho tỉ lệ này cao hoặc ngưỡng task cũ tụt về 0,10 thì dừng trước khi chạy
+task.
