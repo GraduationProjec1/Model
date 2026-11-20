@@ -7,10 +7,13 @@ slot, no teacher. Stages, each written once to ``stages/<stage>.json`` and skipp
 ``split`` (Val-A / Val-B) -> ``baseline`` (round 1 scored on Val-B, feedback images and pairs from Val-A) ->
 ``pilot`` -> ``e1`` (-> ``e2`` only after an e1 stop) -> ``round2`` -> ``final_test`` (once, with confirm).
 
-``new`` (learn SKUs the model does not know) is Part 2 of the plan and not written yet.
+``new`` (learn SKUs the model does not know, Part 2 of the plan) lives in autocheckout/new_skus.py: ``expand`` ->
+``baseline`` -> ``pilot`` -> ``task`` -> ``final_test``; ``--stage data`` only prepares the campaign.
 
     python -m autocheckout.update_model --mode improve --settings configs/training/update_model_improve.json \\
         --stage pilot
+    python -m autocheckout.update_model --mode new --settings configs/training/update_model_new_vn25.json \\
+        --stage task
 """
 
 from __future__ import annotations
@@ -706,18 +709,27 @@ def main(argv: list[str] | None = None) -> dict:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--mode', choices=('improve', 'new'), required=True)
     parser.add_argument('--settings', required=True)
-    parser.add_argument('--stage', choices=(*STAGES, 'data', 'al', 'final_test'), required=True,
-                        help='runs the stages before it that are not done yet, then this one')
-    parser.add_argument('--confirm-test', action='store_true', help='with --stage final_test: score test2019 once')
+    parser.add_argument('--stage', choices=(*STAGES, 'data', 'al', 'final_test', 'expand', 'task'), required=True,
+                        help='runs the stages before it that are not done yet, then this one (mode new: expand, '
+                             'baseline, pilot, task, final_test, data)')
+    parser.add_argument('--confirm-test', action='store_true',
+                        help='with --stage final_test: score the test set once (test2019; mode new: the test photos '
+                             'of the new products)')
     parser.add_argument('--variant', default='pilot',
                         help='with --stage data: the run whose training data to build (split and baseline run first); '
                              'with --stage al: the al_<selection> variant to train; with --stage final_test: an al_* '
                              'run to score on test2019 (once)')
     args = parser.parse_args(argv)
-    if args.mode == 'new':
-        raise NotImplementedError('mode new is Part 2 of the plan (Tasks 8-10)')
     from autocheckout.training_workflow import resolve
 
+    if args.mode == 'new':
+        from autocheckout import new_skus
+
+        if args.stage not in (*new_skus.ORDER, 'data', 'final_test'):
+            parser.error(f'mode new stages: {", ".join(new_skus.ORDER)}, data, final_test')
+        return new_skus.run(load_json(resolve(args.settings)), args.stage, confirm=args.confirm_test)
+    if args.stage in ('expand', 'task'):
+        parser.error(f'--stage {args.stage} is a stage of mode new')
     plan = prepare(load_json(resolve(args.settings)))
     order = ['split', 'baseline', 'pilot', 'e1', 'round2']
     if args.stage == 'final_test':
