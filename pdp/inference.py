@@ -15,6 +15,7 @@ from transformers.image_transforms import center_to_corners_format
 from autocheckout.io import md5_file
 from autocheckout.predictions import Predictions, save_predictions
 from datasets.coco_hug import CocoDetection
+from two_pass import prompted_outputs
 
 TOPK_PER_IMAGE = 100
 
@@ -30,22 +31,21 @@ def predict_batch(
     local_query,
     seen_classes,
     topk=TOPK_PER_IMAGE,
+    reuse_features=False,
 ):
     """Top-k (query, class) pairs of each image over classes < seen_classes.
 
     target_sizes: [B, 2] (height, width) the normalised boxes are scaled to.
     Returns one dict per image: scores, labels, queries, boxes (x1, y1, x2, y2 in pixels).
+    reuse_features (P1): the second pass reuses the backbone and encoder of the first; same results.
     """
-    query = None
-    if use_prompts:
-        first = model(pixel_values=pixel_values, pixel_mask=pixel_mask, train=False)
-        query = (
-            first.last_hidden_state
-            if local_query
-            else first.last_hidden_state.mean(dim=1)
-        )
-    outputs = model(
-        pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False
+    outputs = prompted_outputs(
+        model,
+        pixel_values,
+        pixel_mask,
+        use_prompts=use_prompts,
+        local_query=local_query,
+        reuse_features=reuse_features,
     )
 
     prob = outputs.logits[..., :seen_classes].sigmoid()
@@ -69,7 +69,15 @@ def predict_batch(
 
 
 def predict_loader(
-    model, dataloader, device, *, use_prompts, local_query, seen_classes, meta=None
+    model,
+    dataloader,
+    device,
+    *,
+    use_prompts,
+    local_query,
+    seen_classes,
+    meta=None,
+    reuse_features=False,
 ):
     """Predictions of the model on every image of a dataloader of CocoDetection batches."""
     model.eval()
@@ -85,6 +93,7 @@ def predict_loader(
             use_prompts=use_prompts,
             local_query=local_query,
             seen_classes=seen_classes,
+            reuse_features=reuse_features,
         )
         for target, result in zip(targets, results):
             columns["image_id"].append(
@@ -138,6 +147,7 @@ def write_predictions(
         local_query=bool(args.local_query),
         seen_classes=seen_classes,
         meta=meta,
+        reuse_features=bool(getattr(args, "reuse_features", 0)),
     )
     save_predictions(out_file, predictions)
     return predictions

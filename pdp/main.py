@@ -245,6 +245,13 @@ def get_args_parser():
                         help='F4: let the query loss L_Q back-propagate into query_tf')
     parser.add_argument('--teacher_prompts', default=1, type=int,
                         help='F5: teacher runs two passes with the prompts of earlier tasks (as at inference)')
+    parser.add_argument('--reuse_features', default=0, type=int,
+                        help='P1 (docs/design/2026-11-22-toi-uu-2-luot): compute the backbone once for both passes '
+                             '(and the teacher); in eval also reuse the encoder output. Same results; 0 = as before')
+    parser.add_argument('--cache_pseudo', default='0', choices=['0', '1', 'auto'],
+                        help='P2: cache the teacher pseudo-labels of each image (batches without padding) for the '
+                             'later epochs of a task. auto = on unless --augment, --feature_kd or --ppg_legacy; '
+                             '1 = on, error with those flags; 0 = as before')
     parser.add_argument('--pseudo', default='ppg', choices=['ppg', 'threshold', 'none'],
                         help='Pseudo-labels of earlier classes: PPG (paper), fixed threshold only, or none')
     parser.add_argument('--ppg_legacy', default=0, type=int,

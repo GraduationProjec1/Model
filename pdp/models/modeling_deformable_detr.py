@@ -1486,6 +1486,16 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
     """,
     DEFORMABLE_DETR_START_DOCSTRING,
 )
+@dataclass(frozen=True)
+class BackboneFeatures:
+    """P1 (docs/design/2026-11-22-toi-uu-2-luot): the backbone output of one batch, computed once and reused by both
+    PDP passes (and shared with the teacher). The backbone is deterministic and frozen in PDP, so reusing it gives
+    the same result as running it again."""
+
+    features: tuple[tuple[torch.Tensor, torch.Tensor], ...]  # (feature map, mask) per backbone level
+    position_embeddings: tuple[torch.Tensor, ...]
+
+
 class DeformableDetrModel(DeformableDetrPreTrainedModel):
     def __init__(self, config: DeformableDetrConfig):
         super().__init__(config)
@@ -1562,6 +1572,16 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
     def unfreeze_backbone(self):
         for name, param in self.backbone.conv_encoder.model.named_parameters():
             param.requires_grad_(True)
+
+    def extract_features(self, pixel_values: torch.Tensor, pixel_mask: torch.Tensor | None = None
+                         ) -> BackboneFeatures:
+        """P1: run only the backbone; pass the result to forward(backbone_features=...) to skip it there."""
+        if pixel_mask is None:
+            batch_size, _, height, width = pixel_values.shape
+            pixel_mask = torch.ones((batch_size, height, width), dtype=torch.long, device=pixel_values.device)
+        features, position_embeddings = self.backbone(pixel_values, pixel_mask)
+        return BackboneFeatures(features=tuple(tuple(level) for level in features),
+                                position_embeddings=tuple(position_embeddings))
 
     def get_valid_ratio(self, mask):
         """Get the valid ratio of all feature maps."""
@@ -1656,6 +1676,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         query=None,
         train=False,
         task_id=0,
+        backbone_features: BackboneFeatures | None = None,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         r"""
         Returns:
@@ -1696,7 +1717,12 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         # Extract multi-scale feature maps of same resolution `config.d_model` (cf Figure 4 in paper)
         # First, sent pixel_values + pixel_mask through Backbone to obtain the features
         # which is a list of tuples
-        features, position_embeddings_list = self.backbone(pixel_values, pixel_mask)
+        # P1: backbone_features computed by extract_features() skip the backbone here
+        if backbone_features is None:
+            backbone_features = self.extract_features(pixel_values, pixel_mask)
+        features = backbone_features.features
+        # P1: a new list, so the extra level appended below never changes the shared backbone_features
+        position_embeddings_list = list(backbone_features.position_embeddings)
 
         # Then, apply 1x1 convolution to reduce the channel dimension to d_model (256 by default)
         sources = []
@@ -1949,6 +1975,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         query = None,
         train = False,
         task_id = None,
+        backbone_features: BackboneFeatures | None = None,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrObjectDetectionOutput]:
         r"""
         labels (`List[Dict]` of len `(batch_size,)`, *optional*):
@@ -2006,6 +2033,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             query=query,
             train=train,
             task_id=task_id,
+            backbone_features=backbone_features,
         )
 
         #pdb.set_trace()

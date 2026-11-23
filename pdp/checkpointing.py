@@ -93,6 +93,7 @@ class TrainingProgress(pl.Callback):
                       seconds_per_optimizer_step=round(elapsed / (trainer.global_step-self.initial_step), 3),
                       teacher_forward_calls=getattr(pl_module, 'teacher_forward_calls', 0),
                       ppg_pseudo_labels_total=getattr(pl_module, 'ppg_pseudo_labels_total', 0),
+                      pseudo_cache_hits=getattr(pl_module, 'pseudo_cache_hits', 0),  # P2
                       peak_allocated_gib=round(torch.cuda.max_memory_allocated()/2**30, 3) if torch.cuda.is_available() else 0,
                       peak_reserved_gib=round(torch.cuda.max_memory_reserved()/2**30, 3) if torch.cuda.is_available() else 0)
         with (self.directory / 'step_metrics.jsonl').open('a') as stream:
@@ -105,6 +106,7 @@ class TrainingProgress(pl.Callback):
                           optimizer_step=trainer.global_step,
                           teacher_forward_calls=getattr(pl_module, 'teacher_forward_calls', 0),
                           ppg_pseudo_labels_total=getattr(pl_module, 'ppg_pseudo_labels_total', 0),
+                          pseudo_cache_hits=getattr(pl_module, 'pseudo_cache_hits', 0),  # P2
                           missing_prototypes=pl_module.missing_prototypes()))
 
     def on_exception(self, trainer, pl_module, exception):

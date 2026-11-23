@@ -23,6 +23,7 @@ from models.configuration_deformable_detr import DeformableDetrConfig
 from models.modeling_deformable_detr import DeformableDetrForObjectDetection
 from ppg import prototype_matrix, select_candidates, select_pseudo_labels
 from inference import predict_batch
+from two_pass import prompted_outputs
 from checkpointing import record_epoch
 import runtime
 from autocheckout.io import save_json
@@ -37,6 +38,40 @@ def classifier_from_checkpoint(repo_name, num_labels):
 		return False
 	from models.configuration_deformable_detr import DeformableDetrConfig as Config
 	return Config.from_pretrained(repo_name).num_labels == num_labels
+
+
+def backbone_training_reason(model, args):
+	"""P1: why a backbone parameter would train in some task of this run, or None when it stays frozen.
+
+	Mirrors the freezing of local_trainer.resume(): a parameter is frozen when a part of its name is in --freeze,
+	unless (from task 2 on) a part is in --tune_after_task1 (M5)."""
+	freeze = set(args.freeze.split(',')) if args.freeze else set()
+	tune = set(args.tune_after_task1.split(',')) if args.tune_after_task1 else set()
+	later_tasks = args.n_tasks > 1 or args.start_task > 1
+	for name, _ in model.named_parameters():
+		parts = set(name.split('.'))
+		if 'backbone' not in parts:
+			continue
+		if not parts & freeze:
+			return f'{name} trains (--freeze {args.freeze!r})'
+		if later_tasks and parts & tune:
+			return f'{name} trains from task 2 on (--tune_after_task1 {args.tune_after_task1!r})'
+	return None
+
+
+def pseudo_cache_enabled(args):
+	"""P2: whether the teacher pseudo-labels are cached by image_id (--cache_pseudo). They only repeat across epochs
+	when the image, the teacher and the targets do: not with --augment, nor with --feature_kd (which needs the
+	teacher's encoder output every step), nor with the original pseudo-labelling (--ppg_legacy)."""
+	if args.cache_pseudo == '0':
+		return False
+	checks = (('--augment', args.augment), ('--feature_kd', args.feature_kd > 0), ('--ppg_legacy', args.ppg_legacy))
+	blockers = [flag for flag, on in checks if on]
+	if blockers and args.cache_pseudo == '1':
+		raise ValueError(f'--cache_pseudo 1 cannot be used with {", ".join(blockers)}; use auto or 0')
+	state = f'off ({", ".join(blockers)})' if blockers else 'on'
+	print(f'P2: pseudo-label cache {state} (--cache_pseudo {args.cache_pseudo})', file=args.log_file)
+	return not blockers
 
 
 def frozen_row_mask(train_rows, n_classes, seen_classes):
@@ -80,6 +115,10 @@ class local_trainer(pl.LightningModule):
 		# F5: frozen copy of the previous task's model; not registered as a submodule (see set_teacher)
 		self.__dict__['teacher'] = None
 		self._old_prototypes = None  # F6: prototype matrix of the earlier classes, built on first use
+		# P2: teacher pseudo-labels by image_id, filled in the first epoch of a task (see pseudo_labels)
+		self.use_pseudo_cache = pseudo_cache_enabled(args)
+		self.pseudo_cache = {}
+		self.pseudo_cache_hits = 0
 		#### prompt arguments
 		detr_config.use_prompts = args.use_prompts
 		detr_config.n_tasks = args.n_tasks
@@ -160,6 +199,7 @@ class local_trainer(pl.LightningModule):
 		if self.args.use_prompts:
 			teacher.model.prompts.set_task_id(self.task_id - 2)
 		self.__dict__['teacher'] = teacher
+		self.pseudo_cache = {}  # P2: pseudo-labels of the previous teacher are stale
 
 	def on_fit_start(self):
 		if self.teacher is not None:
@@ -171,17 +211,17 @@ class local_trainer(pl.LightningModule):
 								   for h in self.model.class_embed]
 
 	@torch.no_grad()
-	def teacher_outputs(self, pixel_values, pixel_mask):
+	def teacher_outputs(self, pixel_values, pixel_mask, backbone_features=None):
 		"""Teacher inference as at evaluation time: a first pass gives the query, the second pass
 		uses the prompts (F5). --teacher_prompts 0 restores the original single pass without prompts."""
 		self.teacher_forward_calls = getattr(self, 'teacher_forward_calls', 0) + 1
 		self.teacher.eval()
-		outputs = self.teacher(pixel_values=pixel_values, pixel_mask=pixel_mask, train=False, task_id=self.task_id - 1)
-		if not (self.args.use_prompts and self.args.teacher_prompts):
-			return outputs
-		query = outputs.last_hidden_state if self.args.local_query else outputs.last_hidden_state.mean(dim=1)
-		return self.teacher(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False,
-							task_id=self.task_id - 1)
+		# P1: with --reuse_features the second pass reuses the teacher's backbone and encoder (same results)
+		return prompted_outputs(
+			self.teacher, pixel_values, pixel_mask,
+			use_prompts=bool(self.args.use_prompts and self.args.teacher_prompts),
+			local_query=self.args.local_query, reuse_features=bool(self.args.reuse_features),
+			backbone_features=backbone_features, first_task_id=self.task_id - 1, second_task_id=self.task_id - 1)
 
 	def update_class_cache(self, cls_idx, new_query):
 
@@ -347,23 +387,53 @@ class local_trainer(pl.LightningModule):
 
 	def add_pseudo_labels(self, teacher_outputs, labels):
 		"""Append pseudo-labels of earlier classes to each image's targets (PPG, fix F6; see ppg.py)."""
+		# called through the class so a duck-typed trainer (tests/test_pdp_f6_ppg.py) keeps working as before P2
+		pseudo = local_trainer.compute_pseudo_labels(self, teacher_outputs, labels)
+		return local_trainer.attach_pseudo_labels(self, labels, pseudo)
+
+	def compute_pseudo_labels(self, teacher_outputs, labels):
+		"""PPG pseudo-labels of each image as (boxes, labels); does not change ``labels`` (P2 caches them)."""
 		prev = self.PREV_INTRODUCED_CLS
 		scores, cand_labels, queries, boxes = select_candidates(
 			teacher_outputs.logits, teacher_outputs.pred_boxes, prev, self.args.pseudo_topk)
 		if self._old_prototypes is None:
 			self._old_prototypes = prototype_matrix(self.class_prototypes, prev, self.device)
 		prototypes, valid = self._old_prototypes
+		pseudo = []
 		for i, target in enumerate(labels):
 			features = teacher_outputs.last_hidden_state[i, queries[i]]
-			new_boxes, new_labels = select_pseudo_labels(
+			pseudo.append(select_pseudo_labels(
 				scores[i], cand_labels[i], boxes[i], features, prototypes, valid, mode=self.args.pseudo,
 				tau_high=self.args.pseudo_thresh_high, tau_low=self.args.pseudo_thresh_low,
 				sim_thresh=self.args.prototype_sim_thresh, nearest_prototype=bool(self.args.prototype_nearest),
-				gt_boxes=target['boxes'], gt_iou=self.args.pseudo_gt_iou, dedup_iou=self.args.pseudo_dedup_iou)
+				gt_boxes=target['boxes'], gt_iou=self.args.pseudo_gt_iou, dedup_iou=self.args.pseudo_dedup_iou))
+		return pseudo
+
+	def attach_pseudo_labels(self, labels, pseudo):
+		"""Append each image's pseudo-labels to its targets, in place as before P2, and return ``labels``."""
+		for target, (new_boxes, new_labels) in zip(labels, pseudo, strict=True):
 			target['class_labels'] = torch.cat([target['class_labels'], new_labels.to(target['class_labels'].dtype)])
 			target['boxes'] = torch.cat([target['boxes'], new_boxes.to(target['boxes'].dtype)])
 			self.ppg_pseudo_labels_total = getattr(self, 'ppg_pseudo_labels_total', 0) + len(new_labels)
 		return labels
+
+	def cached_pseudo_labels(self, labels, pixel_mask):
+		"""P2: the cached pseudo-labels of every image of the batch, or None (cache off, padding, or a miss).
+		Only batches without padding: padding depends on the other images of the batch."""
+		if not self.use_pseudo_cache or not bool(pixel_mask.all()):
+			return None
+		ids = [int(target['image_id']) for target in labels]
+		if not all(image_id in self.pseudo_cache for image_id in ids):
+			return None
+		self.pseudo_cache_hits += len(ids)
+		return [tuple(t.to(self.device) for t in self.pseudo_cache[image_id]) for image_id in ids]
+
+	def store_pseudo_labels(self, labels, pixel_mask, pseudo):
+		if self.use_pseudo_cache and bool(pixel_mask.all()):
+			for target, (boxes, classes) in zip(labels, pseudo, strict=True):
+				# copies: .cpu() of a CPU tensor is the same tensor, which later code could change in place
+				cached = (boxes.detach().cpu().clone(), classes.detach().cpu().clone())
+				self.pseudo_cache[int(target['image_id'])] = cached
 
 	def common_step(self, batch, batch_idx, return_outputs=None):
 		pixel_values = batch["pixel_values"].to(self.device)
@@ -371,13 +441,22 @@ class local_trainer(pl.LightningModule):
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
 		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 
+		# P1: the backbone runs once per step for the teacher and both student passes (None: as before)
+		backbone_features = self.shared_backbone_features(pixel_values, pixel_mask)
+		shared = {} if backbone_features is None else {'backbone_features': backbone_features}
+
 		# F5: the teacher is built once, before training, from the weights of the previous task
 		# (see set_teacher); the original loaded a hard-coded checkpoint07.pth at the first step and
 		# silently disabled distillation and pseudo-labelling when that file was missing.
 		old_model_outputs = None
 		if (not self.eval_mode and self.task_id > 1 and self.teacher is not None and
 			hasattr(self.args, 'use_distillation') and self.args.use_distillation):
-			old_model_outputs = self.teacher_outputs(pixel_values, pixel_mask)
+			# P2: images of a cached batch skip the teacher
+			pseudo = self.cached_pseudo_labels(labels, pixel_mask)
+			if pseudo is None:
+				old_model_outputs = self.teacher_outputs(pixel_values, pixel_mask, **shared)
+			else:
+				labels = self.attach_pseudo_labels(labels, pseudo)
 		if old_model_outputs is not None:
 			if self.args.ppg_legacy:
 				old_results = self.processor.post_process(
@@ -387,11 +466,16 @@ class local_trainer(pl.LightningModule):
 				)
 				labels = self.generate_old_class_pseudo_labels(old_results, labels, old_model_outputs)
 			else:
-				labels = self.add_pseudo_labels(old_model_outputs, labels)
+				pseudo = self.compute_pseudo_labels(old_model_outputs, labels)
+				self.store_pseudo_labels(labels, pixel_mask, pseudo)
+				labels = self.attach_pseudo_labels(labels, pseudo)
 		if self.args.use_prompts:
 			with torch.no_grad():
 
-				outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels,  train=False, task_id=self.task_id)
+				# P1: with --reuse_features the query pass computes no loss (thrown away; L_Q has its own matcher)
+				outputs = self.model(
+					pixel_values=pixel_values, pixel_mask=pixel_mask, labels=None if shared else labels,
+					train=False, task_id=self.task_id, **shared)
 
 				if not self.args.local_query:
 					query = outputs.last_hidden_state.mean(dim=1)
@@ -419,7 +503,9 @@ class local_trainer(pl.LightningModule):
 		else:
 			query = None
 
-		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+		outputs = self.model(
+			pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True,
+			task_id=self.task_id, **shared)
 
 		if self.training and hasattr(outputs, 'last_hidden_state'):
 			is_last_epoch = (self.current_epoch == self.args.epochs - 1) if hasattr(self.args, 'epochs') else False
@@ -618,7 +704,7 @@ class local_trainer(pl.LightningModule):
 		sizes = torch.stack([t['orig_size'] for t in targets]).to(self.device)
 		results = predict_batch(self.model, batch['pixel_values'].to(self.device), batch['pixel_mask'].to(self.device),
 								sizes, use_prompts=bool(self.args.use_prompts), local_query=bool(self.args.local_query),
-								seen_classes=self.seen_classes)
+								seen_classes=self.seen_classes, reuse_features=bool(self.args.reuse_features))
 		res = {t['image_id'].item(): r for t, r in zip(targets, results)}
 		self.coco_evaluator.update(self.evaluator.prepare_for_coco_detection(res))
 
@@ -732,7 +818,29 @@ class local_trainer(pl.LightningModule):
 				if not flag:
 					print ('Trainable ..', name, "  Req grad .. ",params.requires_grad, file=self.args.log_file)
 			self.log_trainable_parameters()
-	
+		self.check_reuse_features()
+
+	def check_reuse_features(self):
+		"""P1: --reuse_features shares backbone features computed without gradient, so the backbone must stay frozen
+		in every task of the run. Checked when task 1 starts, not when a later task opens the backbone (M5).
+		Without prompts or teacher (FSA, NAIVE) there is nothing to share and the flag changes nothing."""
+		if not self.args.reuse_features or self.args.eval or self.args.predict_only:  # nothing trains
+			return
+		if not (self.args.use_prompts or self.args.pseudo != 'none'):
+			print('P1: --reuse_features has no effect (no prompts, no teacher)', file=self.args.log_file)
+			return
+		reason = backbone_training_reason(self.model, self.args)
+		if reason:
+			raise ValueError(f'--reuse_features 1 needs a frozen backbone, but {reason}; run with --reuse_features 0')
+
+	def shared_backbone_features(self, pixel_values, pixel_mask):
+		"""P1: backbone output of the batch for the teacher and both student passes, or None when the flag is off
+		or nothing is shared. No gradient needed: check_reuse_features() made sure the backbone is frozen."""
+		if not (self.args.reuse_features and (self.args.use_prompts or self.teacher is not None)):
+			return None
+		with torch.no_grad():
+			return self.model.model.extract_features(pixel_values, pixel_mask)
+
 	def log_trainable_parameters(self):
 		"""F10: number of trained parameters per group and learning rate, written to the task log.
 
@@ -931,19 +1039,13 @@ class Evaluator():
 			labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]] # these are in DETR format, resized + normalized
 			orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 		
-			if self.args.use_prompts:
-				# pdb.set_trace()
-				with torch.no_grad():
-					outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, train=False, task_id=self.task_id)
-
-					if not self.args.local_query:
-						query = outputs.last_hidden_state.mean(dim=1)
-					else:
-						query = outputs.last_hidden_state
-			else:
-				query = None
-
-			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False)
+			# P1: same two passes as before (task_id on the first pass only); --reuse_features runs the
+			# backbone and encoder once
+			with torch.no_grad():
+				outputs = prompted_outputs(
+					self.model, pixel_values, pixel_mask, use_prompts=bool(self.args.use_prompts),
+					local_query=self.args.local_query, reuse_features=bool(self.args.reuse_features),
+					first_task_id=self.task_id if self.args.use_prompts else None)
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10

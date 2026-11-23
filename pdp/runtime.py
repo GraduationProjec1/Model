@@ -217,6 +217,10 @@ def training_contract(args):
         "query_loss_grad",
     )
     result = {key: getattr(args, key) for key in keys}
+    # P1/P2: only when set, so checkpoints written before these flags existed still resume with them off
+    for key, default in (("reuse_features", 0), ("cache_pseudo", "0")):
+        if getattr(args, key, default) != default:
+            result[key] = getattr(args, key)
     files = {"task_config": args.task_config}
     if getattr(args, "task", None) and args.task_ann_dir:
         name = (
