@@ -150,3 +150,36 @@ def test_full_syn_rl_config_only_sets_the_class_count():
     _, pdp = resolved_args("EXP-FULL-SYN", FSA_HF="/fixture/fsa/task_1/hf_model")
     _, rl = resolved_args("EXP-FULL-SYN-RL", FSA_HF="/fixture/fsa/task_1/hf_model")
     assert {k for k in vars(pdp) if getattr(rl, k) != getattr(pdp, k)} == {"n_classes"} and rl.n_classes == 275
+
+
+# --- P1/P2 (docs/design/2026-11-22-toi-uu-2-luot, Task 7): the flags come from the environment, off by default ---
+def native_common_args(**env):
+    config = REPO_ROOT / "configs/exp/native/common.sh"
+    result = subprocess.run(
+        ["bash", "-ec", 'source "$CONFIG"; printf "%s\\0" "${ARGS[@]}"'],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CONFIG": str(config), "REPO": str(REPO_ROOT), "BACKBONE": "resnet50",
+             "RAW_ROOT": "/fixture/raw", "RELEASE_ROOT": "/fixture/release", **env},
+    )
+    assert result.returncode == 0, result.stderr
+    return main_args(result.stdout.split("\0")[:-1])
+
+
+def test_native_common_keeps_reuse_and_cache_off_by_default(monkeypatch):
+    monkeypatch.delenv("REUSE_FEATURES", raising=False)
+    monkeypatch.delenv("CACHE_PSEUDO", raising=False)
+    args = native_common_args()
+    assert args.reuse_features == 0 and args.cache_pseudo == "0"
+
+
+def test_native_common_takes_reuse_and_cache_from_the_environment():
+    args = native_common_args(REUSE_FEATURES="1", CACHE_PSEUDO="auto")
+    assert args.reuse_features == 1 and args.cache_pseudo == "auto"
+
+
+def test_no_native_config_declares_reuse_or_cache_again():
+    """common.sh sets them once; a later --reuse_features/--cache_pseudo would silently override the environment."""
+    later = [p.name for p in (REPO_ROOT / "configs/exp/native").glob("*.sh")
+             if p.name != "common.sh" and ("--reuse_features" in p.read_text() or "--cache_pseudo" in p.read_text())]
+    assert later == []

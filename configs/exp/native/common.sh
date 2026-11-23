@@ -29,6 +29,8 @@ ARGS=(
     --freeze_shared_after_task1 0 --pseudo_dedup_iou 0
     --stop_after_steps "${STOP_AFTER_STEPS:-0}" --verify_resume "${VERIFY_RESUME:-0}"
     --ckpt_every_minutes "${CKPT_EVERY_MINUTES:-2}"
+    # P1/P2 (docs/design/2026-11-22-toi-uu-2-luot): speed-ups with the same results; off unless exported
+    --reuse_features "${REUSE_FEATURES:-0}" --cache_pseudo "${CACHE_PSEUDO:-0}"
 )
 if [[ -n ${PREV_CKPT:-} ]]; then
     ARGS+=(--prev_ckpt "$PREV_CKPT")
