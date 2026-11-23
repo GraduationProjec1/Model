@@ -464,7 +464,8 @@ def rotated_bbox_areas(alpha: np.ndarray, angles=range(0, 180, 15)) -> np.ndarra
     return np.array(areas)
 
 
-def fit_scales(cutouts: list[dict[str, Any]], skus: list[dict[str, Any]], val_coco: dict[str, Any]) -> dict[str, dict]:
+def fit_scales(cutouts: list[dict[str, Any]], skus: list[dict[str, Any]], val_coco: dict[str, Any], *,
+               matches: dict[int, list[tuple[float, int]]] | None = None, min_matches: int = 10) -> dict[str, dict]:
     """Val pixels per source pixel for every (SKU, camera) the SKU table uses.
 
     Main poses (every camera of flat and mixed SKUs, pooled; camera weight >= 0.5 of upright SKUs): the median val bbox area
@@ -472,6 +473,13 @@ def fit_scales(cutouts: list[dict[str, Any]], skus: list[dict[str, Any]], val_co
     at random angles too. Minor standing pose (the rare camera of upright SKUs): the cutout long side is set to
     the median short side of the val boxes (the lying diameter). Source pixels are recovered from the
     PNG through ``bbox_source``, because PNGs above 1000 px were downscaled at extraction.
+
+    ``matches`` (cach 1, AN/cyclegan/ra_soat/README.md section 5): per SKU, (val bbox area, camera whose cutouts the
+    object looks most like) from tools.camera_weights match. Then every main camera gets its own k: the median area of
+    its look-alikes over the median rotated area of its cutouts (one pooled k is wrong once 4 cameras at different
+    distances and cutout counts are pooled). A camera with fewer than ``min_matches`` look-alikes (10: best on the
+    held-out check) takes the median ratio, over SKUs of the same shape group, of its k to the k of the SKU's
+    best-matched camera. Without ``matches`` nothing changes.
     """
     val = defaultdict(lambda: {"area": [], "short": []})
     for ann in val_coco["annotations"]:
@@ -490,24 +498,70 @@ def fit_scales(cutouts: list[dict[str, Any]], skus: list[dict[str, Any]], val_co
         source_per_png = max(c["bbox_source"][2:]) / max(c["size"])
         return float(np.median(rotated_bbox_areas(alpha))) * source_per_png ** 2, max(alpha.shape) * source_per_png
 
-    scales = {}
+    scales, per_camera = {}, {}
     for sku in skus:
         sid, weights = sku["rpc_category_id"], {int(c): w for c, w in sku["camera_weights"].items() if w > 0}
         upright = sku.get("shape_group") == "upright"
-        main = [c for c, w in weights.items() if w >= 0.5 or not upright]
+        # A2 (AN/cyclegan/03): with weights over 4 cameras no camera of an upright SKU may reach 0.5, so the table
+        # names the standing pose; without the key the old rule holds
+        standing = sku.get("standing_cameras")
+        if standing is None:
+            main = [c for c, w in weights.items() if w >= 0.5 or not upright]
+        else:
+            main = [c for c in weights if c not in {int(s) for s in standing}]
         main_stats = [source_stats(c) for cam in main for c in by_key[sid, cam]]
         if not main_stats or not val[sid]["area"]:
             raise ValueError(f"SKU {sid}: no cutouts or val boxes to fit a scale")
-        k = float(np.sqrt(np.median(val[sid]["area"]) / np.median([a for a, _ in main_stats])))
-        for cam in main:
-            scales[f"{sid}:{cam}"] = {"k": round(k, 5), "method": "rotated_area", "n_cutouts": len(main_stats),
-                                      "n_val": len(val[sid]["area"])}
+        if matches is not None:
+            per_camera[sid] = (sku.get("shape_group"), main,
+                               {cam: [source_stats(c)[0] for c in by_key[sid, cam]] for cam in main})
+        else:
+            k = float(np.sqrt(np.median(val[sid]["area"]) / np.median([a for a, _ in main_stats])))
+            for cam in main:
+                scales[f"{sid}:{cam}"] = {"k": round(k, 5), "method": "rotated_area", "n_cutouts": len(main_stats),
+                                          "n_val": len(val[sid]["area"])}
         for cam in (c for c in weights if c not in main):
             minor = [source_stats(c) for c in by_key[sid, cam]]
             k_minor = float(np.median(val[sid]["short"]) / np.median([side for _, side in minor]))
             scales[f"{sid}:{cam}"] = {"k": round(k_minor, 5), "method": "standing_short_side",
                                       "n_cutouts": len(minor), "n_val": len(val[sid]["short"])}
+    if matches is not None:
+        scales.update(_per_camera_scales(per_camera, matches, min_matches))
     return scales
+
+
+def _per_camera_scales(per_camera: dict, matches: dict, min_matches: int) -> dict[str, dict]:
+    """Cach 1 of fit_scales: own k per camera from its look-alikes, group-ratio fallback below ``min_matches``."""
+    fitted, ref_of = {}, {}
+    for sid, (_, main, areas) in per_camera.items():
+        by_cam = defaultdict(list)
+        for area, cam in matches.get(sid, []):
+            by_cam[int(cam)].append(area)
+        fitted[sid] = {cam: (float(np.sqrt(np.median(by_cam[cam]) / np.median(areas[cam]))), len(by_cam[cam]))
+                       for cam in main if areas[cam] and len(by_cam[cam]) >= min_matches}
+        if not fitted[sid]:
+            raise ValueError(f"SKU {sid}: no main camera has {min_matches} matched val objects")
+        ref_of[sid] = max(fitted[sid], key=lambda c: fitted[sid][c][1])
+    ratios = defaultdict(list)
+    for sid, ks in fitted.items():
+        ref = ref_of[sid]
+        for cam, (k, _) in ks.items():
+            ratios[per_camera[sid][0], ref, cam].append(k / ks[ref][0])
+    out = {}
+    for sid, (group, main, areas) in per_camera.items():
+        ref = ref_of[sid]
+        for cam in main:
+            if cam in fitted[sid]:
+                k, n = fitted[sid][cam]
+                out[f"{sid}:{cam}"] = {"k": round(k, 5), "method": "matched_area", "n_cutouts": len(areas[cam]),
+                                       "n_matched": n}
+            else:
+                # no SKU of the group to borrow from: the k of the reference camera (ratio 1), as on the held-out check
+                r = ratios.get((group, ref, cam))
+                out[f"{sid}:{cam}"] = {"k": round(fitted[sid][ref][0] * (float(np.median(r)) if r else 1.0), 5),
+                                       "method": "group_ratio" if r else "ref_camera_k", "ref_camera": ref,
+                                       "n_ratio": len(r or []), "n_cutouts": len(areas[cam])}
+    return out
 
 
 def canonical_coco(records: list[dict[str, Any]], categories: list[dict[str, Any]]) -> dict[str, Any]:

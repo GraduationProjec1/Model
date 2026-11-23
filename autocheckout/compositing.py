@@ -223,6 +223,13 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
         color = rng.uniform(1 - photo["object_color"], 1 + photo["object_color"], 3)
         rgb = rgba[..., :3].astype(np.float32)
         rgb = np.clip(((rgb - 128) * contrast + 128) * gain * color, 0, 255)
+        # v2c (AN/cyclegan/so_sanh_xu_ly, 23/11): cutouts from the light box are paler than objects on the counter
+        # (val object saturation 95 vs 73); a fixed factor, no random draw, 1.0 keeps old releases unchanged
+        saturation = photo.get("object_saturation", 1.0)
+        if saturation != 1.0:
+            hsv = cv2.cvtColor((rgb / 255.0).astype(np.float32), cv2.COLOR_RGB2HSV)
+            hsv[..., 1] = np.clip(hsv[..., 1] * saturation, 0, 1)
+            rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB) * 255.0
         edge = photo["edge_blur"]
         soft = cv2.GaussianBlur(alpha, (edge, edge), 0)[..., None] if edge > 1 else alpha[..., None]
         region = canvas[y:y + h, x:x + w]

@@ -246,7 +246,12 @@ def cmd_scales(args) -> None:
     """Fit val-pixel scales per SKU and camera on the design val split (D5)."""
     config = load_config(args.config)
     cutouts = load_json(config["catalog"])["cutouts"]
-    scales = fit_scales(cutouts, load_json(config["skus"])["skus"], load_json(config["design_val"]))
+    # cach 1 (AN/cyclegan/ra_soat/README.md section 5): per-camera scales from tools.camera_weights match output
+    matches = None
+    if config.get("scale_matches"):
+        matches = {int(s): [tuple(m) for m in v["matches"]] for s, v in load_json(config["scale_matches"])["skus"].items()}
+    scales = fit_scales(cutouts, load_json(config["skus"])["skus"], load_json(config["design_val"]),
+                        matches=matches, min_matches=config.get("scale_min_matches", 10))
     save_json(scales_path(config), {"created_at": now(), "config_sha256": config["_sha256"],
                                     "catalog_sha256": sha256_file(config["catalog"]), "scales": scales}, indent=1)
     ks = np.array([v["k"] for v in scales.values()])

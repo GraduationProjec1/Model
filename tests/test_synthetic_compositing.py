@@ -156,3 +156,114 @@ def test_basket_fuller_than_the_tray_replays_once_more_one_jitter_sigma_smaller(
     out = render_scene(recipe(4), cutouts=cutouts, scales=large, config=config, backgrounds_dir=root)
     assert out["resolved"]["retry"] >= 2 * LAYOUT["scene_retries"] and out["resolved"]["min_visible"] == 0.6
     assert all(a["visible_fraction"] >= 0.6 for a in out["annotations"])
+
+
+def _saturation(rgb):
+    import cv2
+    return cv2.cvtColor(rgb.astype(np.uint8)[None], cv2.COLOR_RGB2HSV)[0][:, 1].astype(float)
+
+
+def test_object_saturation_default_keeps_old_images(assets):
+    """v2c (AN/cyclegan/so_sanh_xu_ly): a missing object_saturation renders exactly as before (factor 1.0)."""
+    old = render(assets, recipe(4))
+    same = render(assets, recipe(4), {**CONFIG, "photometric": {**PHOTO, "object_saturation": 1.0}})
+    assert np.array_equal(old["image"], same["image"]) and old["resolved"] == same["resolved"]
+
+
+def test_object_saturation_scales_object_colour_only(assets):
+    base = render(assets, recipe(4))
+    more = render(assets, recipe(4), {**CONFIG, "photometric": {**PHOTO, "object_saturation": 1.3}})
+    assert np.array_equal(base["owner"], more["owner"])            # same layout: no extra random draws
+    obj = base["owner"] > 0
+    s0, s1 = _saturation(base["image"][obj]), _saturation(more["image"][obj])
+    room = (s0 > 40) & (s0 < 150)                                   # pixels that do not clip at full saturation
+    assert 1.2 < np.median(s1[room] / s0[room]) < 1.4
+    far = ~obj
+    for a in base["annotations"]:                                    # tray pixels away from every object
+        x, y, w, h = a["bbox"]
+        far[max(0, y - 12):y + h + 12, max(0, x - 12):x + w + 12] = False
+    assert np.abs(more["image"][far].astype(int) - base["image"][far].astype(int)).max() <= 1
+
+
+def _upright_fixture(tmp_path):
+    rgba = np.zeros((40, 10, 4), np.uint8)                 # lying bottle: long and thin
+    rgba[..., 3] = 255
+    Image.fromarray(rgba, "RGBA").save(tmp_path / "side.png")
+    cap = np.zeros((12, 12, 4), np.uint8)                  # standing bottle seen from the top: the cap
+    cap[..., 3] = 255
+    Image.fromarray(cap, "RGBA").save(tmp_path / "top.png")
+    cutouts = [{"cutout_id": f"x:{c}", "file": str(tmp_path / ("top.png" if c == 2 else "side.png")),
+                "rpc_category_id": 1, "camera": c, "size": [12, 12] if c == 2 else [10, 40],
+                "bbox_source": [0, 0, 12, 12] if c == 2 else [0, 0, 10, 40]} for c in range(4)]
+    val = {"annotations": [{"category_id": 1, "bbox": [0, 0, 30, 120]}] * 3}
+    return cutouts, val
+
+
+def test_fit_scales_standing_cameras_with_four_camera_weights(tmp_path):
+    """A2: with weights over 4 cameras no camera of an upright SKU may reach 0.5; ``standing_cameras`` names the
+    standing pose (camera 2), every other camera is a main (lying) pose."""
+    cutouts, val = _upright_fixture(tmp_path)
+    skus = [{"rpc_category_id": 1, "shape_group": "upright", "standing_cameras": [2],
+             "camera_weights": {"0": 0.40, "1": 0.20, "2": 0.03, "3": 0.37}}]
+    scales = fit_scales(cutouts, skus, val)
+    assert {scales[f"1:{c}"]["method"] for c in (0, 1, 3)} == {"rotated_area"}
+    assert scales["1:2"]["method"] == "standing_short_side"
+    assert scales["1:2"]["k"] == pytest.approx(30 / 12)    # cap diameter = median val short side
+
+
+def test_fit_scales_without_standing_cameras_keeps_the_old_rule(tmp_path):
+    cutouts, val = _upright_fixture(tmp_path)
+    skus = [{"rpc_category_id": 1, "shape_group": "upright", "camera_weights": {"0": 0.99, "2": 0.01}}]
+    scales = fit_scales([c for c in cutouts if c["camera"] in (0, 2)], skus, val)
+    assert scales["1:0"]["method"] == "rotated_area" and scales["1:2"]["method"] == "standing_short_side"
+
+
+def _rect_cutout(tmp_path, name, w, h):
+    rgba = np.zeros((h, w, 4), np.uint8)
+    rgba[..., 3] = 255
+    Image.fromarray(rgba, "RGBA").save(tmp_path / name)
+    return str(tmp_path / name)
+
+
+def test_fit_scales_per_camera_from_matched_val_objects(tmp_path):
+    """Cach 1 (AN/cyclegan/ra_soat/README.md, section 5): with ``matches`` every main camera of a SKU gets its own
+    k from the Val-A objects that look most like that camera; a camera with fewer than ``min_matches`` takes the
+    shape group's median ratio to the SKU's best-matched camera."""
+    big, small = _rect_cutout(tmp_path, "big.png", 20, 20), _rect_cutout(tmp_path, "small.png", 10, 10)
+    cutouts, skus, matches = [], [], {}
+    for sid in (1, 2, 3):
+        for cam, f, side in ((2, big, 20), (0, small, 10)):
+            cutouts.append({"cutout_id": f"{sid}:{cam}", "file": f, "rpc_category_id": sid, "camera": cam,
+                            "size": [side, side], "bbox_source": [0, 0, side, side]})
+        skus.append({"rpc_category_id": sid, "shape_group": "flat", "camera_weights": {"0": 0.3, "2": 0.7}})
+    # SKUs 1 and 2: camera-2 look-alikes are 40x40 boxes, camera-0 look-alikes 30x30; SKU 3 has only 3 camera-0 ones
+    for sid, n0 in ((1, 12), (2, 12), (3, 3)):
+        matches[sid] = [(40 * 40, 2)] * 20 + [(30 * 30, 0)] * n0
+    val = {"annotations": [{"category_id": s, "bbox": [0, 0, 40, 40]} for s in (1, 2, 3)]}
+    scales = fit_scales(cutouts, skus, val, matches=matches, min_matches=10)
+    k2 = scales["1:2"]["k"]
+    k0 = scales["1:0"]["k"]
+    assert scales["1:2"]["method"] == scales["1:0"]["method"] == "matched_area"
+    assert k0 / k2 == pytest.approx((30 / 10) / (40 / 20), rel=0.05)      # each camera fits its own look-alikes
+    assert scales["3:0"]["method"] == "group_ratio"
+    assert scales["3:0"]["k"] / scales["3:2"]["k"] == pytest.approx(k0 / k2, rel=0.01)
+
+
+def test_fit_scales_without_matches_is_unchanged(tmp_path):
+    big = _rect_cutout(tmp_path, "big.png", 20, 20)
+    cutouts = [{"cutout_id": "1:2", "file": big, "rpc_category_id": 1, "camera": 2, "size": [20, 20],
+                "bbox_source": [0, 0, 20, 20]}]
+    skus = [{"rpc_category_id": 1, "camera_weights": {"2": 1.0}}]
+    val = {"annotations": [{"category_id": 1, "bbox": [0, 0, 40, 40]}] * 3}
+    assert fit_scales(cutouts, skus, val) == fit_scales(cutouts, skus, val, matches=None)
+    assert fit_scales(cutouts, skus, val)["1:2"]["method"] == "rotated_area"
+
+
+def test_fit_scales_without_a_group_ratio_uses_the_reference_camera_k(tmp_path):
+    big, small = _rect_cutout(tmp_path, "big.png", 20, 20), _rect_cutout(tmp_path, "small.png", 10, 10)
+    cutouts = [{"cutout_id": f"1:{cam}", "file": f, "rpc_category_id": 1, "camera": cam, "size": [side, side],
+                "bbox_source": [0, 0, side, side]} for cam, f, side in ((2, big, 20), (0, small, 10))]
+    skus = [{"rpc_category_id": 1, "shape_group": "flat", "camera_weights": {"0": 0.3, "2": 0.7}}]
+    val = {"annotations": [{"category_id": 1, "bbox": [0, 0, 40, 40]}]}
+    scales = fit_scales(cutouts, skus, val, matches={1: [(1600, 2)] * 20 + [(900, 0)] * 3}, min_matches=10)
+    assert scales["1:0"]["method"] == "ref_camera_k" and scales["1:0"]["k"] == scales["1:2"]["k"]
