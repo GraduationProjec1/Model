@@ -14,6 +14,7 @@ from conftest import REPO_ROOT
 
 R3_REAL, R3_ALL = 'al_margin_k_B500_r3_real', 'al_margin_k_B500_r3_all'
 S1, R4 = 'al_margin_k_B500_r3_real_s1', 'al_margin_k_B500_r4'
+R4_PQ = 'al_margin_k_B500_r4_pq'
 
 FAKE_PYTHON = r"""#!/bin/bash
 echo "$*" >> "$CALLS"
@@ -39,6 +40,8 @@ case $module in
             mkdir -p "$camp/stages" "$camp/runs/EXP-FB-FT-$variant/task_5"
             touch "$camp/stages/$variant.json" "$camp/runs/EXP-FB-FT-$variant/task_5/pred_val.npz"
         fi ;;
+    tools.p1_check)
+        [[ -n ${FAIL_P1:-} ]] && { echo "P1 lệch"; exit 2; } ;;
     tools.al_score)
         mkdir -p "$AC_DATA/relearn/active/scored" "$AC_DATA/relearn/active/scored_test"
         touch "$AC_DATA/relearn/active/scored/$name.json"
@@ -134,14 +137,36 @@ def test_a_stale_prediction_without_a_stage_is_not_scored(tmp_path):
     assert result.returncode != 0 and _calls(tmp_path, 'tools.al_score') == []
 
 
+
+def test_round4_pq_reuses_the_round4_data_and_trains_under_its_own_name(tmp_path):
+    """E1 của plan A: không dựng dữ liệu mới khi đã có variant _r4; train, chấm với tên _r4_pq."""
+    result = _run_al(tmp_path, R4_PQ)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _calls(tmp_path, 'tools.al_round2') == [] and _calls(tmp_path, 'tools.al_build_variant') == []
+    trained = [c for c in _calls(tmp_path, 'autocheckout.update_model') if '--stage al' in c]
+    assert len(trained) == 1 and f'--variant {R4_PQ}' in trained[0]
+    scores = _calls(tmp_path, 'tools.al_score')
+    assert len(scores) == 1 and f'--name {R4_PQ}' in scores[0]
+
+
+def test_round4_pq_builds_the_round4_data_when_missing(tmp_path):
+    repo = _repo(tmp_path, 'run_al.sh')
+    shutil.rmtree(tmp_path / 'data/relearn/variants' / R4)
+    result = _run_al(tmp_path, R4_PQ)
+    assert result.returncode == 0, result.stdout + result.stderr
+    [build] = _calls(tmp_path, 'tools.al_round2')
+    assert '--from al_margin_k_B500_r3_real' in build
+    assert repo.exists()
+
+
 FAKE_RUN_AL = r"""#!/bin/bash
-echo "run_al $*" >> "$CALLS"
+echo "run_al $* REUSE_FEATURES=${REUSE_FEATURES:-unset}" >> "$CALLS"
 for pattern in ${FAIL_STEP:-}; do [[ " $* " == *" $pattern "* ]] && exit 1; done
 exit 0
 """
 
 
-def _vast(tmp_path: Path, **extra: str) -> tuple[subprocess.CompletedProcess, Path]:
+def _vast(tmp_path: Path, task: str = 'al_r4', skip: tuple = (), **extra: str) -> tuple[subprocess.CompletedProcess, Path]:
     repo = _repo(tmp_path, 'vast_train_and_sync.sh')
     (repo / 'scripts/run_al.sh').write_text(FAKE_RUN_AL)
     camp = repo / 'data/training/update-model/relearn-fix-v2'
@@ -155,13 +180,16 @@ def _vast(tmp_path: Path, **extra: str) -> tuple[subprocess.CompletedProcess, Pa
         need += [camp / f'stages/{v}.json', camp / f'runs/EXP-FB-FT-{v}/task_5/task_final.pth',
                  camp / f'runs/EXP-FB-FT-{v}/task_5/pred_val.npz', camp / f'scored/{v}/calibration_count_m2.json',
                  camp / f'scored/{v}/calibration_count_groups.json']
+    need += [data / 'eval/val_full.json', data / 'rpc/val2019/x.jpg']
     for f in need:
+        if f.name in skip:
+            continue
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text('{}')
     env = _env(tmp_path, repo, SKIP_MD5='1', AUTO_DESTROY='0', SYNC_EVERY_MIN='0', **extra)
-    result = subprocess.run(['bash', str(repo / 'scripts/vast_train_and_sync.sh'), 'al_r4'], env=env,
+    result = subprocess.run(['bash', str(repo / 'scripts/vast_train_and_sync.sh'), task], env=env,
                             capture_output=True, text=True)
-    metadata = next((repo / 'data/training/update-model').glob('vast_logs_al_r4_*/run_metadata.txt'))
+    metadata = next((repo / 'data/training/update-model').glob(f'vast_logs_{task}_*/run_metadata.txt'))
     return result, metadata
 
 
@@ -178,3 +206,35 @@ def test_al_r4_runs_every_step_after_a_failed_b0_and_records_the_failure(tmp_pat
     assert result.returncode != 0
     text = metadata.read_text()
     assert 'Exit Code: 0' not in text and '[LỖI]' in text and 'B0' in text
+
+
+def _steps(tmp_path: Path) -> list[str]:
+    return [line for line in (tmp_path / 'calls.txt').read_text().splitlines() if line.startswith('run_al')]
+
+
+def test_attn_e1_checks_p1_then_trains_r4_pq_with_reuse_and_breaks_down_the_errors(tmp_path):
+    result, metadata = _vast(tmp_path, 'attn_e1')
+    assert result.returncode == 0, result.stdout + result.stderr
+    [check] = _calls(tmp_path, 'tools.p1_check')
+    assert f'EXP-FB-FT-{R3_REAL}/task_5/task_final.pth' in check and '--device cuda' in check
+    assert '--img-root ' + str(tmp_path / 'data/rpc') in check
+    assert _steps(tmp_path) == [f'run_al {R4_PQ} REUSE_FEATURES=1']
+    [breakdown] = _calls(tmp_path, 'tools.error_breakdown')
+    assert f'EXP-FB-FT-{R4_PQ}/task_5/pred_val.npz' in breakdown and f'scored/{R4_PQ}.json' in breakdown
+    assert 'Exit Code: 0' in metadata.read_text()
+
+
+def test_attn_e1_trains_without_reuse_when_p1_changes_the_outputs(tmp_path):
+    result, metadata = _vast(tmp_path, 'attn_e1', FAIL_P1='1')
+    assert _steps(tmp_path) == [f'run_al {R4_PQ} REUSE_FEATURES=0']
+    assert result.returncode != 0
+    text = metadata.read_text()
+    assert '[LỖI]' in text and 'G0' in text
+
+
+def test_attn_e1_stops_before_any_gpu_work_when_an_input_is_missing(tmp_path):
+    result, _ = _vast(tmp_path, 'attn_e1', skip=('val_full.json',))
+    assert result.returncode == 3
+    calls = tmp_path / 'calls.txt'
+    text = calls.read_text() if calls.exists() else ''
+    assert 'tools.p1_check' not in text and 'run_al' not in text

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from autocheckout.datapaths import REPO, Layout
 from autocheckout.io import load_json, save_json
+from autocheckout.update_model import data_variant
 
 DEFAULT_CAMPAIGN = REPO / 'data/training/update-model/relearn-fix-v2'
 
@@ -25,7 +26,7 @@ def collect(release: Path, campaign: Path) -> list[dict]:
         s = load_json(scored)
         name = s['name']
         row = {'name': name, 'cAcc_calib': s['cAcc_m2']}
-        manifest = release / 'variants' / name / 'manifest.json'
+        manifest = release / 'variants' / data_variant(name) / 'manifest.json'
         if manifest.is_file():
             m = load_json(manifest)
             row.update(strategy=m['strategy'], budget=m['budget'], seed=m['seed'], round=m.get('round', 1),

@@ -246,6 +246,42 @@ case "$TASK" in
             step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
         fi
         ;;
+    attn_e1)
+        # docs/project/ke-hoach-chay-25-11-2026.md: G0 (P1 trên GPU) rồi E1 = r4 với prompt theo từng query (plan A)
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        R3="$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r3_real/task_5/task_final.pth"
+        V=al_margin_k_B500_r4_pq
+        IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
+        NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$CAMP/stages/al_margin_k_B500_r3_real.json" "$R3"
+              "$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r3_real/task_5/pred_val.npz"
+              "$DATA_DIR/relearn/active/selections/margin_k_B500_r3.json"
+              "$DATA_DIR/relearn/active/splits/val_a_split.json" "$DATA_DIR/relearn/variants/e1/train_task_5_fix.json"
+              "$DATA_DIR/relearn/variants/al_margin_k_B500_r3_real/train_rows.json" "$DATA_DIR/eval/val_full.json")
+        for f in "${NEED[@]}"; do
+            [[ -f "$f" ]] || { echo "[THIẾU] $f -> chạy scripts/install_r4.sh trước" | tee -a "$MAIN_LOG"; exit 3; }
+        done
+        [[ -d "$IMG_ROOT/val2019" ]] || { echo "[THIẾU] ảnh val2019 trong $DATA_DIR/rpc hoặc $DATA_DIR/archive" | tee -a "$MAIN_LOG"; exit 3; }
+        WMD5="${WEIGHTS_MD5:-$CAMP/../weights_md5.txt}"
+        if [[ "${SKIP_MD5:-0}" != "1" ]]; then
+            [[ -f "$WMD5" ]] || { echo "[THIẾU] $WMD5 (install_r4.sh bước 3; SKIP_MD5=1 để bỏ qua có chủ ý)" | tee -a "$MAIN_LOG"; exit 3; }
+            (cd "$CAMP/.." && md5sum -c --quiet --ignore-missing "$WMD5") || { echo "[THIẾU] md5 weights lệch $WMD5" | tee -a "$MAIN_LOG"; exit 3; }
+        fi
+        echo ">> G0: P1 trên GPU với r3_real (tốc độ, kết quả không đổi; ~15 phút)..." | tee -a "$MAIN_LOG"
+        step G0 python -m tools.p1_check --checkpoint "$R3" --val "$DATA_DIR/eval/val_full.json" --img-root "$IMG_ROOT" \
+            --split "$DATA_DIR/relearn/active/splits/val_a_split.json" --device cuda --out "$LOG_DIR/g0_p1_check"
+        REUSE="${REUSE_FEATURES:-1}"
+        if [[ " ${FAILED_STEPS[*]:-} " == *" G0 "* ]]; then
+            REUSE=0
+            echo "[CẢNH BÁO] G0 không đạt: E1 chạy với REUSE_FEATURES=0" | tee -a "$MAIN_LOG"
+        fi
+        echo ">> E1: $V (REUSE_FEATURES=$REUSE, ~2,5-3 giờ)..." | tee -a "$MAIN_LOG"
+        step E1 env REUSE_FEATURES="$REUSE" bash scripts/run_al.sh "$V"
+        echo ">> Phân rã lỗi của $V..." | tee -a "$MAIN_LOG"
+        step BREAKDOWN python -m tools.error_breakdown --val "$CAMP/inputs/val_b/val_full.json" \
+            --pred "$CAMP/runs/EXP-FB-FT-$V/task_5/pred_val.npz" --policy "$DATA_DIR/relearn/active/scored/$V.json" \
+            --task-config configs/relearn/task_config_relearn.json --rows "$CAMP/inputs/$V/train_rows.json" \
+            --out "$REPO_DIR/data/training/update-model/error_breakdown_$V"
+        ;;
     al_dot2)
         echo ">> Chạy Active Learning đợt 2 (B=250, 850 + entropy)..." | tee -a "$MAIN_LOG"
         bash scripts/run_al.sh dot2 2>&1 | tee -a "$MAIN_LOG"

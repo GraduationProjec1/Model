@@ -277,3 +277,16 @@ def test_round4_selects_from_the_round3_model_and_names_the_variant_r4(release, 
         al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
     with pytest.raises(ValueError):
         al_round2._rounds('al_m_r3_real_s1')
+
+
+def test_report_reads_the_manifest_of_the_data_a_round4_tag_reuses(tmp_path):
+    """al_..._r4_pq dùng dữ liệu của al_..._r4: bảng phải ghi đúng strategy/vòng, không ghi là baseline."""
+    from tools import al_report
+
+    rel = tmp_path / 'relearn'
+    _w(rel / 'active/scored/al_margin_k_B500_r4_pq.json', {'name': 'al_margin_k_B500_r4_pq', 'cAcc_m2': 0.69})
+    _w(rel / 'variants/al_margin_k_B500_r4/manifest.json', {'strategy': 'margin_k', 'budget': 500, 'seed': None,
+                                                            'round': 4, 'labelled_images': 2000,
+                                                            'labelled_boxes': 24000})
+    [row] = al_report.collect(rel, tmp_path / 'camp')
+    assert row['strategy'] == 'margin_k' and row['round'] == 4

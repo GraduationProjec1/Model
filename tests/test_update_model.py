@@ -375,3 +375,47 @@ class _no_attempt:
 
     def __exit__(self, *exc):
         return False
+
+
+def test_round4_pq_is_round4_with_per_query_prompts(tmp_path):
+    """al_<selection>_r4_pq (E1 của plan A): công thức, gate, điểm xuất phát và dữ liệu của _r4, chỉ bật A."""
+    name = 'al_margin_k_B500_r4_pq'
+    assert um._kind(name) == 'r4_pq'
+    assert um.VARIANTS['r4_pq'] == {**um.VARIANTS['r4'], 'per_query_prompt': 1}
+    assert um.GATES['r4_pq'] == um.GATES['r4']
+    assert um._per_query_prompt(um.VARIANTS['r4_pq']) == 1
+    assert um._per_query_prompt(um.VARIANTS['r4']) == 0
+    with pytest.raises(ValueError, match='round-4 tag'):
+        um._kind('al_margin_k_B500_r4_xx')
+
+    runs = tmp_path / 'runs'
+    (tmp_path / 'stages').mkdir()
+    (tmp_path / 'stages' / 'al_margin_k_B500_r3_real.json').write_text('{}')
+    plan = {'root': str(tmp_path), 'runs': str(runs), 'seed_task5': '/r1.pth'}
+    assert um._al_start(plan, name) == um._al_start(plan, 'al_margin_k_B500_r4')
+
+
+def test_round4_pq_uses_the_data_of_round4(tmp_path):
+    variant = tmp_path / 'relearn/variants/al_margin_k_B500_r4'
+    variant.mkdir(parents=True)
+    (variant / 'train_task_5_fix.json').write_text('{}')
+    plan = {'prebuilt_release': str(tmp_path / 'relearn')}
+    assert um.data_variant('al_margin_k_B500_r4_pq') == 'al_margin_k_B500_r4'
+    assert um.data_variant('al_margin_k_B500_r4') == 'al_margin_k_B500_r4'
+    assert um._prebuilt(plan, 'al_margin_k_B500_r4_pq') == variant
+
+
+def test_exp_fb_ft_per_query_prompt_flag_follows_the_environment(tmp_path):
+    import subprocess
+
+    base = dict(REPO=str(REPO), FSA_HF='/fsa', SYNTH_ROOT='/synth', PREV_CKPT='/r2.pth', TRAIN_ROWS='/rows.json',
+                PATH='/usr/bin:/bin')
+    script = f'source {REPO}/configs/exp/native/EXP-FB-FT.sh; printf "%s\\0" "${{ARGS[@]}}"'
+
+    def flags(env):
+        out = subprocess.run(['bash', '-ec', script], env=env, capture_output=True, text=True,
+                             check=True).stdout.split('\0')[:-1]
+        return {flag: out[i + 1] for i, flag in enumerate(out[:-1]) if flag in ('--per_query_prompt', '--local_query')}
+
+    assert flags(base) == {'--per_query_prompt': '0', '--local_query': '1'}
+    assert flags({**base, 'PER_QUERY_PROMPT': '1'}) == {'--per_query_prompt': '1', '--local_query': '0'}

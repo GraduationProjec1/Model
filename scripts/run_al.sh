@@ -78,6 +78,9 @@ build() {
     local v=$1
     if [[ $v == *_r3_* ]]; then
         r3_build "$v"
+    elif [[ $v == *_r4_* ]]; then
+        local base=${v%_*}
+        [[ -f $REL/variants/$base/train_task_5_fix.json ]] || build "$base"
     elif [[ $v == *_r4 ]]; then
         python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r4}_r3_real" --budget "${R4_BUDGET:-500}" \
             2>&1 | tee -a "$LOG"

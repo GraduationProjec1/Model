@@ -63,6 +63,8 @@ SEED_TAGS = {'real_s1': ('real', 1)}
 VARIANTS.update({f'{R3_TAGS[data]}_s{seed}': {**VARIANTS[R3_TAGS[data]], 'seed': seed}
                  for data, seed in SEED_TAGS.values()})
 VARIANTS['r4'] = dict(VARIANTS['r3_strong'])
+R4_TAGS = {'pq': {'per_query_prompt': 1}}
+VARIANTS.update({f'r4_{tag}': {**VARIANTS['r4'], **recipe} for tag, recipe in R4_TAGS.items()})
 R4_FROM = 'real'
 TRAIN_SEED = 0
 FIRST_PAIR_DROP, LATER_PAIR_DROP, TOP_PAIR_RISE = 0.25, 0.10, 0.05
@@ -74,6 +76,7 @@ GATES = {
 }
 LATER = {**GATES['pilot'], 'pair_drop': LATER_PAIR_DROP}
 GATES.update({kind: dict(LATER) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze', 'r4')})
+GATES.update({f'r4_{tag}': dict(LATER) for tag in R4_TAGS})
 GATES.update({f'{R3_TAGS[data]}_s{seed}': dict(LATER) for data, seed in SEED_TAGS.values()})
 GATES = {kind: {**gate, 'top_pair_rise': TOP_PAIR_RISE} for kind, gate in GATES.items()}
 QUOTA_KEYS = {'quota_relearn': 600, 'quota_v2': 300, 'quota_v2_only': 600}
@@ -102,6 +105,11 @@ def _kind(name: str) -> str:
     if name.startswith('al_'):
         if name.endswith('_r4'):
             return 'r4'
+        if '_r4_' in name:
+            tag = name.rsplit('_r4_', 1)[1]
+            if tag not in R4_TAGS:
+                raise ValueError(f'{name}: round-4 tag must be one of {sorted(R4_TAGS)}')
+            return f'r4_{tag}'
         return 'round2' if name.endswith('_r2') else 'pilot'
     return name
 
@@ -117,6 +125,17 @@ def _train_seed(hp: dict) -> int:
     return int(hp.get('seed', TRAIN_SEED))
 
 
+def _per_query_prompt(hp: dict) -> int:
+    return int(hp.get('per_query_prompt', 0))
+
+
+def data_variant(name: str) -> str:
+    """The variant whose training data a run uses: a round-4 tag (``_r4_pq``) reuses the data of ``_r4``."""
+    if name.startswith('al_') and '_r4_' in name and name.rsplit('_r4_', 1)[1] in R4_TAGS:
+        return name.rsplit('_r4_', 1)[0] + '_r4'
+    return name
+
+
 def _al_start(plan: dict, name: str) -> tuple[str, str]:
     """(model to start from, run to compare with) of an active-learning variant."""
     if '_r3_' in name:
@@ -124,8 +143,8 @@ def _al_start(plan: dict, name: str) -> tuple[str, str]:
         if _done(plan, second) is None:
             raise RuntimeError(f'{name} starts from {second}: train {second} first')
         return str(Path(plan['runs']) / f'{EXP}-{second}' / f'task_{STAGE}/task_final.pth'), second
-    if name.endswith('_r4'):
-        third = f'{name.removesuffix("_r4")}_r3_{R4_FROM}'
+    if name.endswith('_r4') or _kind(name).startswith('r4_'):
+        third = f'{name.rsplit("_r4", 1)[0]}_r3_{R4_FROM}'
         if _done(plan, third) is None:
             raise RuntimeError(f'{name} starts from {third}: train {third} first')
         return str(Path(plan['runs']) / f'{EXP}-{third}' / f'task_{STAGE}/task_final.pth'), third
@@ -336,7 +355,7 @@ def _prebuilt(plan: dict, name: str) -> Path | None:
     """The variant folder of a release built ahead by build_relearn_data.py (settings ``prebuilt_release``), if any."""
     if not plan.get('prebuilt_release'):
         return None
-    variant = Path(plan['prebuilt_release']) / 'variants' / name
+    variant = Path(plan['prebuilt_release']) / 'variants' / data_variant(name)
     return variant if (variant / 'train_task_5_fix.json').is_file() else None
 
 
@@ -426,7 +445,8 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
                                PRED_SPLITS=splits, STOP_AFTER_STEPS=0, FSA_HF=fsa_hf, PREV_CKPT=prev,
                                TRAIN_ROWS=task_dir / 'train_rows.json', LR=hp['lr'], LR_OLD=hp['lr_old'],
                                LR_DROP=hp['lr_drop'], AUGMENT=hp.get('augment', 0),
-                               TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp))
+                               TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp),
+                               PER_QUERY_PROMPT=_per_query_prompt(hp))
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']
