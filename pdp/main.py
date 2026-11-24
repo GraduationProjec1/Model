@@ -165,6 +165,8 @@ def get_args_parser():
                         help='Lambda parameter for query-based continual learning')
     parser.add_argument('--local_query', default=0, type=int, 
                         help='Flag to enable localalized query')
+    parser.add_argument('--per_query_prompt', default=0, type=int,
+                        help='A: every object query selects its own prompt mixture (no query_tf); needs --local_query 0')
     parser.add_argument('--start_task', default=1, type=int, 
                         help='Task to start training from in continual learning')
     parser.add_argument('--task_id', default=0, type=int, 

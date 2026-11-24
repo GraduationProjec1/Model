@@ -271,3 +271,17 @@ Bước 4 (code A) làm được song song với bước 5 (G0) vì không phụ
   - Hại: đổi ngữ nghĩa (prompt phụ thuộc trạng thái đã có prompt), nên cần ablation riêng.
 - Loss tương phản với prototype (hướng L): đang chờ người dùng chọn thêm thành E7 hay thay E2.
 - bf16, ONNX/TensorRT: ngoài phạm vi, như plan perf.
+
+---
+
+## 11. Nhật ký thực hiện (24/11)
+
+| Mục | Đã làm | Khác plan ở đâu, vì sao |
+|---|---|---|
+| Comment | `4df908d` (xoá comment, 204 file) đã push lên `origin/perf/two-pass-reuse` | Theo yêu cầu người dùng |
+| Nhánh | `feat/attn-prompt` từ `4df908d` trong `AutoCheckout-CL-perf`, plan ở `docs/project/` | Không tạo worktree mới, theo yêu cầu "làm trên nền perf" |
+| C0 | **Dời sang phiên GPU G0** | `pred_val.npz` của r4 không còn trên máy. Chấm lại 6000 ảnh val tốn khoảng 5–6 giờ CPU nhưng chỉ vài phút GPU. Đã tìm lại nhãn Val-B (`ket_qua_gpu/_phan_tich/data/relearn/meta/val_b.json`, 2897 ảnh), split Val-A (`.../active/splits/val_a_split.json`), checkpoint r4 (`models/AL-margin-k-r4/task_final.pth`) và ảnh (`data/archive/val2019`, 6000 ảnh) |
+| A3 | `two_pass.prompted_outputs` tự đọc `model.config.per_query_prompt` | **Gọn hơn plan:** không phải sửa teacher, validation, `evaluate`, `predict_batch` (hợp đồng chữ ký với `checkout-system`), benchmark. Chỉ sửa `pdp/two_pass.py` và `common_step` |
+| **A5 (mới)** | Cho phép chạy per-query từ checkpoint chọn prompt theo ảnh (r3_real, r4): `runtime.validate_runtime` bỏ qua kiểm `local_query`/`per_query_prompt` khi chuyển sang per-query; `engine.resume` bỏ trọng số `query_tf` và ghi log. Chiều ngược lại vẫn báo lỗi | **Plan thiếu bước này:** E1 phải xuất phát từ r3_real như r4, mà checkpoint đó có `local_query=1` và `query_tf`, code cũ từ chối nạp |
+| Config | `configs/exp/native/common.sh`: `PER_QUERY_PROMPT=1` bật A và tự đặt `--local_query 0` | Theo quy ước biến môi trường của P1/P2 |
+| Test | `tests/test_pdp_a_per_query_prompt.py` (11 test) + 2 test config | A-T7 (IoU query giữa 2 lượt trên checkpoint r4) chưa làm: cần model thật, làm cùng G0 |

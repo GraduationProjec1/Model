@@ -21,7 +21,8 @@ ARGS=(
     --num_workers "${NUM_WORKERS:-0}" --tf32 "${TF32:-0}" --seed 0 --augment 0
     --epochs "${EPOCHS:-2}" --eval_epochs "${EVAL_EPOCHS:-1}" --shuffle "${SHUFFLE:-1}" --print_freq "${PRINT_FREQ:-1}"
     --lr 0.0001 --lr_old 0.00001 --optim_groups prompt
-    --use_prompts 1 --local_query 1 --num_prompts 100 --prompt_len 10
+    --use_prompts 1 --local_query "$(( ${PER_QUERY_PROMPT:-0} ? 0 : 1 ))" --num_prompts 100 --prompt_len 10
+    --per_query_prompt "${PER_QUERY_PROMPT:-0}"
     --lambda_query 0.1 --ddl_lambda 0.15 --query_loss_grad 1
     --freeze backbone,encoder,decoder --new_params class_embed,prompts
     --freeze_shared_after_task1 0 --pseudo_dedup_iou 0

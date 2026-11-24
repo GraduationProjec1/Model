@@ -730,7 +730,8 @@ class DeformableDetrMultiheadAttention(nn.Module):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states_original)
 
-        if prompt_list is not None:
+        per_query = prompt_list is not None and prompt_list[0].dim() == 4
+        if prompt_list is not None and not per_query:
             pk, pv = prompt_list
             key_states = torch.cat((pk,key_states), dim=1)
             value_states = torch.cat((pv,value_states), dim=1)
@@ -743,10 +744,13 @@ class DeformableDetrMultiheadAttention(nn.Module):
         key_states = key_states.view(*proj_shape)
         value_states = value_states.view(*proj_shape)
 
-
-        source_len = key_states.size(1)
-
         attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))
+        if per_query:
+            # A: query t attends to its own prompt prefix pk[:, t] ahead of the queries
+            pk, pv = (self._per_query_heads(t, batch_size) for t in prompt_list)
+            attn_weights = torch.cat((torch.einsum('ntd,ntpd->ntp', query_states, pk), attn_weights), dim=-1)
+
+        source_len = attn_weights.size(-1)
 
         if attn_weights.size() != (batch_size * self.num_heads, target_len, source_len):
             raise ValueError(
@@ -776,7 +780,12 @@ class DeformableDetrMultiheadAttention(nn.Module):
 
         attn_probs = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
 
-        attn_output = torch.bmm(attn_probs, value_states)
+        if per_query:
+            n_prefix = pk.size(2)
+            attn_output = (torch.einsum('ntp,ntpd->ntd', attn_probs[..., :n_prefix], pv)
+                           + torch.bmm(attn_probs[..., n_prefix:], value_states))
+        else:
+            attn_output = torch.bmm(attn_probs, value_states)
 
         if attn_output.size() != (batch_size * self.num_heads, target_len, self.head_dim):
             raise ValueError(
@@ -791,6 +800,12 @@ class DeformableDetrMultiheadAttention(nn.Module):
         attn_output = self.out_proj(attn_output)
 
         return attn_output, attn_weights_reshaped
+
+    def _per_query_heads(self, tensor: torch.Tensor, batch_size: int):
+        """[B, T, P, E] prompt prefix of every query -> [B * heads, T, P, head_dim], split like _shape."""
+        _, target_len, n_prefix, _ = tensor.shape
+        tensor = tensor.view(batch_size, target_len, n_prefix, self.num_heads, self.head_dim)
+        return tensor.permute(0, 3, 1, 2, 4).reshape(batch_size * self.num_heads, target_len, n_prefix, self.head_dim)
 
 
 class DeformableDetrEncoderLayer(nn.Module):

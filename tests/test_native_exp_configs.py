@@ -182,3 +182,15 @@ def test_no_native_config_declares_reuse_or_cache_again():
     later = [p.name for p in (REPO_ROOT / "configs/exp/native").glob("*.sh")
              if p.name != "common.sh" and ("--reuse_features" in p.read_text() or "--cache_pseudo" in p.read_text())]
     assert later == []
+
+
+def test_native_common_keeps_per_query_prompt_off_by_default(monkeypatch):
+    monkeypatch.delenv("PER_QUERY_PROMPT", raising=False)
+    args = native_common_args()
+    assert args.per_query_prompt == 0 and args.local_query == 1
+
+
+def test_native_common_per_query_prompt_turns_local_query_off():
+    """A: query_tf and its loss L_Q only exist with --local_query 1, which --per_query_prompt 1 replaces."""
+    args = native_common_args(PER_QUERY_PROMPT="1")
+    assert args.per_query_prompt == 1 and args.local_query == 0

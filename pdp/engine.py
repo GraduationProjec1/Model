@@ -121,6 +121,7 @@ class local_trainer(pl.LightningModule):
 		detr_config.num_prompts = args.num_prompts
 		detr_config.prompt_len = args.prompt_len
 		detr_config.local_query = args.local_query
+		detr_config.per_query_prompt = getattr(args, 'per_query_prompt', 0)
 		detr_config.task_num_classes = args.task_num_classes
 		detr_config.use_shared_pool = args.use_shared
 		detr_config.use_private_pool = args.use_private
@@ -457,7 +458,9 @@ class local_trainer(pl.LightningModule):
 					pixel_values=pixel_values, pixel_mask=pixel_mask, labels=None if shared else labels,
 					train=False, task_id=self.task_id, **shared)
 
-				if not self.args.local_query:
+				if getattr(self.args, 'per_query_prompt', 0):
+					query = outputs.last_hidden_state
+				elif not self.args.local_query:
 					query = outputs.last_hidden_state.mean(dim=1)
 				else:
 					query = outputs.last_hidden_state
@@ -731,12 +734,23 @@ class local_trainer(pl.LightningModule):
 		os.replace(tmp_path, path)
 		print(f'Model saved to {path}', file=self.args.log_file)
 	
+	def without_query_tf(self, state):
+		"""A: a per-query run started from an image-level checkpoint drops its query_tf weights (no such module)."""
+		if not getattr(self.args, 'per_query_prompt', 0):
+			return state
+		dropped = [k for k in state if '.prompts.query_tf.' in k]
+		if dropped:
+			print(f'A: --per_query_prompt 1 drops {len(dropped)} query_tf weights of the checkpoint: {dropped}',
+				  file=self.args.log_file)
+		return {k: v for k, v in state.items() if k not in dropped}
+
 	def resume(self, load_path=''):
 		print('\n Resuming model for task ', self.task_id, ' from : ',load_path, file=self.args.log_file)
 		if load_path:
 			checkpoint = torch.load(load_path, map_location='cpu')
 			runtime.validate_runtime(self.args, checkpoint.get('runtime'))
-			missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model'], strict='runtime' in checkpoint)
+			missing_keys, unexpected_keys = self.model.load_state_dict(
+				self.without_query_tf(checkpoint['model']), strict='runtime' in checkpoint)
 
 			if 'class_query_cache' in checkpoint:
 				self.class_query_cache = checkpoint['class_query_cache']

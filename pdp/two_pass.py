@@ -26,7 +26,9 @@ def prompted_outputs(model, pixel_values, pixel_mask, *, use_prompts, local_quer
                   **task_kwargs(first_task_id), **shared)
     if not use_prompts:
         return first
-    query = first.last_hidden_state if local_query else first.last_hidden_state.mean(dim=1)
+    # A (--per_query_prompt): the model config says every query selects its own prompts, whatever the caller passes
+    every_query = local_query or getattr(model.config, 'per_query_prompt', 0)
+    query = first.last_hidden_state if every_query else first.last_hidden_state.mean(dim=1)
     second = {**shared, 'encoder_outputs': (first.encoder_last_hidden_state,)} if reuse_features else shared
     return model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False,
                  **task_kwargs(second_task_id), **second)

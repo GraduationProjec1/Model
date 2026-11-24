@@ -19,6 +19,9 @@ class Prompt(nn.Module):
         self.use_shared = bool(getattr(args, 'use_shared_pool', True))
         self.use_private = bool(getattr(args, 'use_private_pool', True))
         self.tune_old_private = bool(getattr(args, 'tune_old_private', False))
+        self.per_query = bool(getattr(args, 'per_query_prompt', False))
+        if self.per_query and args.local_query:
+            raise ValueError('--per_query_prompt 1 replaces query_tf; run it with --local_query 0')
         if not (self.use_shared or self.use_private):
             raise ValueError('at least one prompt pool must be used')
         self.total_classes = sum(self.task_num_classes)
@@ -227,7 +230,7 @@ class Prompt(nn.Module):
                 rows[s:f] = orthonormal_rows(rows[:s], f - s)
 
     def forward(self, x_querry, l, x_block, train=False, task_id=None):
-        if len(x_querry.shape) != 2:
+        if len(x_querry.shape) != 2 and not self.per_query:
             query_wt = self.query_tf(x_querry.view(x_querry.shape[0], -1))
             x_querry = x_querry * query_wt.unsqueeze(-1)
             x_querry = x_querry.sum(dim=1)
@@ -265,15 +268,17 @@ class Prompt(nn.Module):
         A = torch.cat([a for _, a, _ in pools], dim=0)
         P = torch.cat([q for _, _, q in pools], dim=0)
 
-        a_querry = torch.einsum('bd,kd->bkd', x_querry, A)
-        n_K = nn.functional.normalize(K, dim=1)
-        q = nn.functional.normalize(a_querry, dim=2)
-        aq_k = torch.einsum('bkd,kd->bk', q, n_K)
-        P_ = torch.einsum('bk,kld->bld', aq_k, P)
-
         i = int(self.e_p_length / 2)
-        Ek = P_[:, :i, :]
-        Ev = P_[:, i:, :]
+        if x_querry.dim() == 3:
+            Ek, Ev = per_query_prompts(x_querry, K, A, P, i)
+        else:
+            a_querry = torch.einsum('bd,kd->bkd', x_querry, A)
+            n_K = nn.functional.normalize(K, dim=1)
+            q = nn.functional.normalize(a_querry, dim=2)
+            aq_k = torch.einsum('bkd,kd->bk', q, n_K)
+            P_ = torch.einsum('bk,kld->bld', aq_k, P)
+            Ek = P_[:, :i, :]
+            Ev = P_[:, i:, :]
 
         loss = 0
         if train and self.ortho_mu > 0:
@@ -286,6 +291,20 @@ class Prompt(nn.Module):
                 loss += self.diversity_lambda * diversity_loss
 
         return [Ek, Ev], loss, x_block
+
+
+def per_query_prompts(x, K, A, P, n_key):
+    """A: the CODA-Prompt weights cos(x * A_k, K_k) of every query x[b, q], and its prompt mixture.
+
+    Same weights as the image-level path, written without the [B, Q, pool, D] tensor:
+    cos(x * A, K) = (x . (A * K/|K|)) / |x * A|, and |x * A|^2 = x^2 . A^2.
+    Returns Ek [B, Q, n_key, D] and Ev [B, Q, prompt_len - n_key, D].
+    """
+    n_K = nn.functional.normalize(K, dim=1)
+    dot = torch.einsum('bqd,kd->bqk', x, A * n_K)
+    norm = torch.einsum('bqd,kd->bqk', x * x, A * A).sqrt().clamp_min(1e-12)
+    mixture = torch.einsum('bqk,kld->bqld', dot / norm, P)
+    return mixture[:, :, :n_key], mixture[:, :, n_key:]
 
 
 def orthonormal_rows(existing, n):
