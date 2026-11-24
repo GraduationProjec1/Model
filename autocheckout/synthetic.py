@@ -236,10 +236,14 @@ def plan_scenes(task_id: int, n_images: int, *, task_config, cutouts: list[dict[
     RPC photographed (front, back) and each cutout of a placement is used equally often (Q5).
     """
     rng = np.random.default_rng(stable_seed(seed, "plan", task_id))
-    new_skus = [c.rpc_category_id for c in task_config.task(task_id).classes]
-    old_skus = [c.rpc_category_id for t in task_config.data_tasks if t.task_id < task_id for c in t.classes
-                if c.alias_of is None and c.rpc_category_id not in new_skus]
     weights = {s["rpc_category_id"]: s["camera_weights"] for s in skus}
+    # A4/A5 (AN/cyclegan/03): RPC and VN scenes of one 225-SKU task config are planned apart, each with its own
+    # SKU table; SKUs outside the table never appear (a table holding every SKU plans exactly as before)
+    new_skus = [c.rpc_category_id for c in task_config.task(task_id).classes if c.rpc_category_id in weights]
+    old_skus = [c.rpc_category_id for t in task_config.data_tasks if t.task_id < task_id for c in t.classes
+                if c.alias_of is None and c.rpc_category_id not in new_skus and c.rpc_category_id in weights]
+    if not new_skus:
+        raise ValueError(f"task {task_id}: no SKU of the SKU table is new in this task")
     by_sku_cam = defaultdict(list)
     for c in sorted(cutouts, key=lambda c: c["cutout_id"]):
         by_sku_cam[c["rpc_category_id"], c["camera"]].append(c["cutout_id"])
@@ -628,7 +632,8 @@ def area_budget(val_coco: dict[str, Any], quantile: float = 99) -> tuple[dict[in
 
 def verify_dataset(out_root: str | os.PathLike, task_config, *, min_visible: float, quota_tolerance: float = 0.2,
                    new_ratio: tuple[float, float] = (0.4, 0.6), rle_sample: int | None = None,
-                   cutouts: list[dict[str, Any]] | None = None, view_tolerance: float | None = None) -> dict[str, Any]:
+                   cutouts: list[dict[str, Any]] | None = None, view_tolerance: float | None = None,
+                   sku_ids: set[int] | None = None) -> dict[str, Any]:
     """Mechanical gates of a written release (T3.1). Never repairs anything; returns gate results.
 
     Checks: image files exist and match their recorded hash; generation_task and future-SKU rules; train
@@ -638,6 +643,8 @@ def verify_dataset(out_root: str | os.PathLike, task_config, *, min_visible: flo
     With ``cutouts`` (the catalog) and ``view_tolerance``, also the placement balance (Q5): for each labeled
     SKU and camera, the objects of every placement with cutouts are within ``view_tolerance`` of their
     mean, give or take one object (alternation cannot split an odd count evenly).
+    ``sku_ids`` (the SKU table of the release) limits the quota to those SKUs: RPC and VN scenes of one task are
+    separate releases (A4/A5, AN/cyclegan/03); None checks every SKU of the task, as before.
     """
     from pycocotools import mask as mask_utils
 
@@ -706,9 +713,10 @@ def verify_dataset(out_root: str | os.PathLike, task_config, *, min_visible: flo
         if task.task_id > 1 and not new_ratio[0] <= share <= new_ratio[1]:
             failures["new_share"].append(round(share, 3))
         if per_sku:
-            mean = sum(per_sku.values()) / len(task.classes)
+            quota_skus = [c.rpc_category_id for c in task.classes if sku_ids is None or c.rpc_category_id in sku_ids]
+            mean = sum(per_sku.values()) / len(quota_skus)
             off = {sku: n for sku, n in per_sku.items() if abs(n - mean) > quota_tolerance * mean}
-            missing = [c.rpc_category_id for c in task.classes if c.rpc_category_id not in per_sku]
+            missing = [sku for sku in quota_skus if sku not in per_sku]
             if off or missing:
                 failures["sku_quota"].append({"off": off, "missing": missing})
         for sku, camera in sorted({key[:2] for key in per_view}):

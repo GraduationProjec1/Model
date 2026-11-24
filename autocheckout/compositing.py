@@ -152,6 +152,14 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
     replays = [False, True] if "occluded_min_visible" in layout and not occluded else [False]
     passes = [(replay, 1.0) for replay in replays] + [(replays[-1], float(np.exp(-scale_cfg["jitter_log_sigma"])))]
     attempts = [(replay, shrink, retry) for replay, shrink in passes for retry in range(n_retries)]
+    # A5 (AN/cyclegan/a5, option G of the VN generator): phone photos frame the whole basket, so few objects look
+    # big: one zoom per scene, (n / ref) ** -gamma with jitter, clipped; its own random stream, absent = no zoom
+    zoom = None
+    if scale_cfg.get("zoom_gamma"):
+        zrng = np.random.default_rng(stable_seed(recipe["seed"], "zoom"))
+        zoom = (len(objects) / scale_cfg["zoom_ref"]) ** -scale_cfg["zoom_gamma"] \
+            * zrng.uniform(1 - scale_cfg["zoom_jitter"], 1 + scale_cfg["zoom_jitter"])
+        zoom = float(np.clip(zoom, *scale_cfg["zoom_clip"]))
     for attempt, (replay, shrink, retry) in enumerate(attempts):
         # baskets too full to lie apart get the occluded share's visibility on the last retries, as people
         # stack packs when the counter runs out of room
@@ -175,7 +183,7 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
             png_per_source = max(cutout["size"]) / max(cutout["bbox_source"][2:])
             scale = scales[f"{spec['rpc_category_id']}:{spec['camera']}"]["k"] / png_per_source
             scale *= shrink * scale_cfg.get("calibration", 1.0) \
-                * float(np.exp(rng.normal(0, scale_cfg["jitter_log_sigma"])))
+                * float(np.exp(rng.normal(0, scale_cfg["jitter_log_sigma"]))) * (zoom or 1.0)
             rgba = load_rgba(cutout["file"])
             scale = min(scale, scale_cfg["max_side_frac"] * size / max(rgba.shape[:2]))
             if rng.random() < layout.get("aligned_prob", 0.0):     # lying square to the tray edges
@@ -267,7 +275,7 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
             "resolved": {"retry": attempt, "occluded": occluded or last_resort, "min_visible": layout["min_visible"], "spread": round(spread, 3), "uniform_positions": uniform, "large_first": order is not None, "background_rot90": quarter_turns, "size": size, "light": round(light, 4),
                          "global": {"gain": round(gain, 4), "offset": round(offset, 3), "noise": round(noise, 3),
                                     "blur": None if blur is None else round(blur, 3)},
-                         "objects": resolved}}
+                         "objects": resolved, **({"zoom": round(zoom, 4)} if zoom else {})}}
 
 
 def scene_paths(recipe: dict[str, Any]) -> dict[str, str]:

@@ -267,3 +267,16 @@ def test_a_killed_worker_fails_instead_of_hanging(tmp_path, scene_inputs, monkey
     monkeypatch.setattr(compositing, "write_scene", dying)
     with pytest.raises(BrokenProcessPool):
         generate(recipes, tmp_path / "a", workers=2, **kwargs)
+
+
+def test_verify_quota_counts_only_the_skus_of_the_release(release):
+    # A4/A5 (AN/cyclegan/03): an RPC-only release of a task that also has VN SKUs (planned in their own release)
+    from autocheckout.synthetic import verify_dataset
+    out, config = release
+    with_vn = TaskConfig.from_dict({"name": "t", "seed": 0, "tasks": [{"task_id": 1, "offset": 0, "classes": [
+        {"label": 0, "name": "a", "rpc_category_id": 10}, {"label": 1, "name": "b", "rpc_category_id": 11},
+        {"label": 2, "name": "vn", "rpc_category_id": 201}]}]})
+    report = verify_dataset(out, with_vn, min_visible=0.7, quota_tolerance=0.6)
+    assert not report["gates"]["sku_quota"] and report["failures"]["sku_quota"][0]["missing"] == [201]
+    report = verify_dataset(out, with_vn, min_visible=0.7, quota_tolerance=0.6, sku_ids={10, 11})
+    assert report["passed"], report["failures"]

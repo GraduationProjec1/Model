@@ -1,0 +1,116 @@
+{
+  "name": "rpc_synth_v2_225",
+  "version": "v2-225",
+  "decisions": "AN/cyclegan/03_QUYET_DINH_VA_PLAN.md (A4, 24/11); base: docs/project/synthetic-data-v2-decisions-2026-10-21.md",
+  "seed": 20261021,
+  "task_config": "configs/tasks_225_vn10-3-res25_seed0.json",
+  "catalog": "data/processed/rpc_synth_v2_225_v1/catalog/cutouts.json",
+  "skus": "data/processed/rpc_synth_v2_225_v1/catalog/skus.json",
+  "design_val": "data/processed/rpc_synth_v2_225_v1/design/design_val.json",
+  "backgrounds": "data/archive/backgrounds",
+  "image_root": "data/archive",
+  "images_per_task": {
+    "1": 20850,
+    "2": 10180,
+    "3": 10250,
+    "4": 10220,
+    "5": 10250,
+    "6": 10250
+  },
+  "pilot_images_per_task": 200,
+  "layout": {
+    "basket_patterns": "sampled from design val images of the same level (n objects, units per SKU)",
+    "new_ratio": [
+      0.4,
+      0.6
+    ],
+    "area_budget_quantile": 99,
+    "center_mean": [
+      0.504,
+      0.553
+    ],
+    "center_std": {
+      "easy": 0.1423,
+      "medium": 0.1677,
+      "hard": 0.1866
+    },
+    "min_visible": 0.9,
+    "position_tries": 60,
+    "object_tries": 4,
+    "scene_retries": 16,
+    "retry_spread_step": 0.15,
+    "pack_mode": "compact",
+    "pack_gap": [
+      1.0,
+      1.1
+    ],
+    "pack_center_jitter": 0.3,
+    "compact_prob": 0.8,
+    "occluded_scene_prob": 0.15,
+    "occluded_min_visible": 0.75,
+    "view_balance": true,
+    "quota_tolerance": 0.2
+  },
+  "scale": {
+    "fit": "cach 1: per SKU and camera, median Val-A bbox area of the objects that look most like that camera / median rotated bbox area of its cutouts (>= 10 look-alikes, else the median ratio of the shape group)",
+    "standing_fit": "standing pose (camera 2 of upright SKUs): cutout long side = median val short side",
+    "jitter_log_sigma": 0.08,
+    "max_side_frac": 0.55,
+    "calibration": 1.048
+  },
+  "photometric": {
+    "object_gain": {
+      "0": [
+        0.665,
+        0.824
+      ],
+      "1": [
+        0.734,
+        0.885
+      ],
+      "2": [
+        0.754,
+        0.97
+      ],
+      "3": [
+        0.744,
+        0.882
+      ]
+    },
+    "object_contrast": 0.06,
+    "object_color": 0.03,
+    "shadow_blur": 0.06,
+    "shadow_strength": [
+      0.15,
+      0.35
+    ],
+    "shadow_offset": [
+      0.01,
+      0.03
+    ],
+    "edge_blur": 3,
+    "global_gain": [
+      0.96,
+      1.04
+    ],
+    "global_offset": 6,
+    "noise_sigma": [
+      0.5,
+      2.0
+    ],
+    "blur_prob": 0.0,
+    "blur_sigma": [
+      0.4,
+      0.8
+    ],
+    "jpeg_quality": [
+      72,
+      80
+    ],
+    "object_saturation": 1.3
+  },
+  "notes": "object_gain = p25..p75 of val/cutout luminance ratio per camera (measured 21/10 on design val); center stats measured on design val; jpeg quality matches val2019 (~75); pilot round 1 (21/10): synth/val median bbox area 0.91 -> scale calibration 1/sqrt(0.91)=1.048; bbox covered p50 below val -> center_std x0.9; layout v2 (o15, 21/10): pixel occlusion measured with SAM box masks on 450 val images (notch share 2.8/4.5/5.2%) -> each object >= 90% visible, compact baskets, 15% of scenes (and baskets too full to lie apart) allow 75%; release v1 (scatter, min_visible 0.7) hid 4x more",
+  "scale_matches": "data/processed/rpc_synth_v2_225_v1/catalog/camera_match.json",
+  "scale_min_matches": 10,
+  "notes_225": "A4 24/11. Only RPC SKUs (the SKU table holds 200 RPC SKUs; VN scenes have their own config, A5). design_val = Val-A only (AN/cyclegan/a4/make_design_val.py: val2019 - 208 backgrounds - Val-B, 2895 images; Q9). images_per_task: equal labeled objects per SKU in every task (~2844, plan_scenes on Val-A patterns, AN/cyclegan/a4/simulate_counts.py), total 72000 as D9. center_mean/std: team method (object centre mean; per-level RMS of x/y std x0.9) re-measured on Val-A. object_gain: A3 direct fit 4 cameras (AN/cyclegan/object_gain). v2c: blur_prob 0, object_saturation 1.3 (AN/cyclegan/so_sanh_xu_ly). TO RE-MEASURE at B4/B5 on sam_v2 cutouts: object_gain, scale.calibration (still the old 1.048), camera_match."
+}

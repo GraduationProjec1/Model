@@ -267,3 +267,16 @@ def test_fit_scales_without_a_group_ratio_uses_the_reference_camera_k(tmp_path):
     val = {"annotations": [{"category_id": 1, "bbox": [0, 0, 40, 40]}]}
     scales = fit_scales(cutouts, skus, val, matches={1: [(1600, 2)] * 20 + [(900, 0)] * 3}, min_matches=10)
     assert scales["1:0"]["method"] == "ref_camera_k" and scales["1:0"]["k"] == scales["1:2"]["k"]
+
+
+def test_zoom_by_object_count_scales_every_object_of_the_scene(assets):
+    # A5 (AN/cyclegan/a5): phone photos of the VN counter frame the whole basket, so a small basket looks bigger:
+    # zoom = (n / ref) ** -gamma (option G: gamma 0.55, ref 6.5), here without jitter and inside the clip
+    base = render(assets, recipe(n=2))["resolved"]
+    zoom_cfg = {**SCALE, "zoom_gamma": 0.55, "zoom_ref": 6.5, "zoom_jitter": 0.0, "zoom_clip": [0.7, 1.6]}
+    zoomed = render(assets, recipe(n=2), {**CONFIG, "scale": zoom_cfg})["resolved"]
+    expected = (2 / 6.5) ** -0.55
+    assert expected > 1.6 and zoomed["zoom"] == pytest.approx(1.6)   # clipped
+    ratio = [z["scale"] / b["scale"] for z, b in zip(zoomed["objects"], base["objects"])]
+    assert ratio == pytest.approx([1.6, 1.6], rel=2e-3)
+    assert "zoom" not in base                                       # default: no zoom, old images unchanged

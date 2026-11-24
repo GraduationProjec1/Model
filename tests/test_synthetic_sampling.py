@@ -175,3 +175,28 @@ def test_view_balance_alternates_placements_and_spreads_cutouts():
     for prefix, k in (("f:", 6), ("b:", 2)):
         n = [uses[f"{prefix}{i}"] for i in range(k)]
         assert max(n) - min(n) <= 2
+
+
+def test_scenes_hold_only_skus_of_the_sku_table():
+    # A4/A5 (AN/cyclegan/03): RPC and VN scenes of one task are planned apart from one 225-SKU task config,
+    # each with its own SKU table; an SKU of the task outside the table never appears, labeled or old
+    cutouts, skus = catalog_and_skus()
+    EASY = {"easy": [(2, 1, 1), (3, 2), (1, 1)]}  # task 1 keeps 3 SKUs: no 4-group basket
+    table = [s for s in skus if s["rpc_category_id"] != 3]
+    for task in (1, 2, 3):
+        recipes = plan_scenes(task, 120, task_config=task_config(), cutouts=cutouts, skus=table, patterns=EASY,
+                              backgrounds=["b1.jpg"], layout=LAYOUT, seed=7)
+        seen = {o["rpc_category_id"] for r in recipes for o in r["objects"]}
+        assert seen and 3 not in seen
+    labeled = Counter(o["rpc_category_id"] for r in plan_scenes(
+        1, 300, task_config=task_config(), cutouts=cutouts, skus=table, patterns=EASY,
+        backgrounds=["b1.jpg"], layout=LAYOUT, seed=7) for o in r["objects"])
+    assert set(labeled) == {1, 2, 4} and max(labeled.values()) - min(labeled.values()) <= 3
+
+
+def test_a_task_without_any_sku_of_the_table_is_refused():
+    cutouts, skus = catalog_and_skus()
+    with pytest.raises(ValueError, match="no SKU of the SKU table"):
+        plan_scenes(2, 10, task_config=task_config(), cutouts=cutouts,
+                    skus=[s for s in skus if s["rpc_category_id"] not in (5, 6)], patterns=PATTERNS,
+                    backgrounds=["b1.jpg"], layout=LAYOUT, seed=7)

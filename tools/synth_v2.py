@@ -292,8 +292,11 @@ def cmd_coverage(args) -> None:
     """
     config = load_config(args.config)
     task_config = TaskConfig.load(config["task_config"])
-    rpc_ids = [c.rpc_category_id for task in args.tasks for c in task_config.task(task).classes]
-    coverage = view_coverage(load_json(config["catalog"])["cutouts"], load_json(config["skus"])["skus"],
+    skus = load_json(config["skus"])["skus"]
+    table = {s["rpc_category_id"] for s in skus}   # A4/A5: VN SKUs of the task are in the VN release
+    rpc_ids = [c.rpc_category_id for task in args.tasks for c in task_config.task(task).classes
+               if c.rpc_category_id in table]
+    coverage = view_coverage(load_json(config["catalog"])["cutouts"], skus,
                              load_json(args.train_ann), rpc_ids)
     exceptions = {int(rpc): reason for rpc, reason in config.get("coverage_exceptions", {}).items()
                   if int(rpc) in coverage}
@@ -426,7 +429,8 @@ def cmd_verify(args) -> None:
         if layout.get("view_balance") else {}
     report = verify_dataset(out, TaskConfig.load(config["task_config"]), min_visible=min_visible,
                             quota_tolerance=layout.get("quota_tolerance", 0.2),
-                            new_ratio=tuple(config["layout"]["new_ratio"]), rle_sample=args.rle_sample, **views)
+                            new_ratio=tuple(config["layout"]["new_ratio"]), rle_sample=args.rle_sample,
+                            sku_ids={s["rpc_category_id"] for s in load_json(config["skus"])["skus"]}, **views)
     report["distributions"] = compare_to_val(out, load_json(config["design_val"]))
     report["checked_at"] = now()
     save_json(out / "verify_report.json", report, indent=1)
