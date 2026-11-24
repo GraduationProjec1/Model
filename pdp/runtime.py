@@ -78,7 +78,7 @@ def model_config(args, default_factory):
         config.backbone_pretrained_file = args.backbone_pretrained_file or None
     if args.repo_name and not getattr(args, "backbone_pretrained_file", ""):
         config.use_pretrained_backbone = (
-            False  # detector already contains its own backbone
+            False
         )
     return config
 
@@ -217,7 +217,6 @@ def training_contract(args):
         "query_loss_grad",
     )
     result = {key: getattr(args, key) for key in keys}
-    # P1/P2: only when set, so checkpoints written before these flags existed still resume with them off
     for key, default in (("reuse_features", 0), ("cache_pseudo", "0")):
         if getattr(args, key, default) != default:
             result[key] = getattr(args, key)

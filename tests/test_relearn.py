@@ -15,8 +15,8 @@ from pdp_helpers import task_config_dict
 from tools.eval_count import _validated_predictions
 from tools.make_relearn_config import relearn_config
 
-BASE = TaskConfig.from_dict(task_config_dict(sizes=(2, 1), reserved=0))  # labels 0, 1 | 2
-CFG = relearn_config(BASE, [[0], [2]], reserved=1, name="toy+relearn")    # task 3: alias 3 of 0; task 4: alias 4 of 2
+BASE = TaskConfig.from_dict(task_config_dict(sizes=(2, 1), reserved=0))
+CFG = relearn_config(BASE, [[0], [2]], reserved=1, name="toy+relearn")
 
 
 def preds(task_id, rows, **meta):
@@ -97,9 +97,9 @@ def test_resolve_run_lays_out_a_stage_the_evaluators_read(tmp_path):
         link = target / "task_2" / name
         assert link.is_symlink() and link.resolve() == (source / name).resolve()
 
-    resolve_run(tmp_path / "run", 4, CFG, target, mode="alias_only", as_stage=2)  # rerun replaces it
+    resolve_run(tmp_path / "run", 4, CFG, target, mode="alias_only", as_stage=2)
     assert rows(load_predictions(target / "task_2/pred_val.npz")) == [(0, 0, .9), (1, 2, .5)]
-    with pytest.raises(ValueError, match="task_2"):  # the evaluators need exactly one stage in the target
+    with pytest.raises(ValueError, match="task_2"):
         resolve_run(tmp_path / "run", 4, CFG, target, mode="merge", as_stage=1)
 
 
@@ -115,7 +115,6 @@ def test_relearn_verdict_needs_the_gain_of_its_stage_without_hurting_the_other_s
 
 
 def test_per_sku_accuracy_counts_right_wrong_missed_and_extra_boxes_as_the_selection_did():
-    # image 1: A (label 0) and B (label 1); image 2: C (label 1), no box; one box under its threshold is not counted
     coco = load_coco({"images": [{"id": i, "file_name": f"{i}.jpg", "width": 100, "height": 100} for i in (1, 2)],
                       "annotations": [{"id": k, "image_id": i, "category_id": c, "bbox": b, "area": 100, "iscrowd": 0}
                                       for k, (i, c, b) in enumerate([(1, 0, [0, 0, 10, 10]), (1, 1, [50, 50, 10, 10]),
@@ -159,7 +158,7 @@ def test_task_7_is_refused_when_the_task_6_gate_said_stop(tmp_path):
     (tmp_path / "stages/task6.json").write_text(json.dumps({"stage": 6, "gate": gate}))
     with pytest.raises(GateStop, match="no gain"):
         relearn.stage_task(plan, 7)
-    assert not (tmp_path / "attempts").exists()  # nothing was started
+    assert not (tmp_path / "attempts").exists()
 
 
 @pytest.mark.slow

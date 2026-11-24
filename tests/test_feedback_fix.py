@@ -28,7 +28,7 @@ def test_split_keeps_scene_groups_whole_and_balances_levels():
     assert not {keys[i] for i in ids_a} & {keys[i] for i in ids_b}
     for level in ('easy', 'medium', 'hard'):
         counts = [sum(1 for i in half['images'] if i['level'] == level) for half in (a, b)]
-        assert abs(counts[0] - counts[1]) <= 2  # the largest scene group holds two images
+        assert abs(counts[0] - counts[1]) <= 2
     assert {x['image_id'] for x in a['annotations']} <= ids_a
     assert ff.split_val(val, seed=1) == (a, b)
 
@@ -48,8 +48,8 @@ def counted(rows):
 
 
 def test_wrong_images_pairs_and_rows():
-    val = rpc_val(4)  # image i holds one object of label i
-    preds = counted([(1, 2), (2, 1), (3, 4), (4, 4)])  # 1 -> 2, 2 -> 1, 3 -> 4
+    val = rpc_val(4)
+    preds = counted([(1, 2), (2, 1), (3, 4), (4, 4)])
     assert ff.wrong_images(val, preds, range(5)) == [1, 2, 3]
     pairs = ff.confusion_pairs(val, preds, range(5))
     assert pairs == [(1, 2, 2), (3, 4, 1)]
@@ -67,7 +67,6 @@ def test_aliases_go_back_to_their_original_label_and_images_with_rows():
 
 def test_replay_covers_every_class_first_then_fills():
     images = [{'id': i} for i in range(1, 21)]
-    # label 0 everywhere but images 18-20, which hold the rare labels 3, 4, 5; 5 only in image 20 (excluded)
     anns = [{'id': i, 'image_id': i, 'category_id': 0 if i <= 17 else i - 15} for i in range(1, 21)]
     coco = {'images': images, 'annotations': anns}
     replay = ff.select_replay(coco, exclude=[20], n_images=6, min_per_class=1, labels=range(6), seed=0)
@@ -98,7 +97,7 @@ def test_release_prefixes_names_renumbers_and_repeats(tmp_path):
 
 def test_quota_caps_objects_and_takes_images_with_both_sides_of_a_pair_first():
     images, annotations = [], []
-    layout = {1: [1, 2], 2: [1, 9], 3: [2, 9], 4: [1, 2], 5: [9, 9], 6: [1], 7: [3]}  # image -> labels
+    layout = {1: [1, 2], 2: [1, 9], 3: [2, 9], 4: [1, 2], 5: [9, 9], 6: [1], 7: [3]}
     for image_id, labels in layout.items():
         images.append({'id': image_id})
         for label in labels:
@@ -106,8 +105,8 @@ def test_quota_caps_objects_and_takes_images_with_both_sides_of_a_pair_first():
     coco = {'images': images, 'annotations': annotations}
     chosen = ff.select_by_quota(coco, {1: 2, 2: 2}, seed=0)
     ids = {i['id'] for i in chosen['images']}
-    assert ids == {1, 4}  # two images with both 1 and 2 reach both quotas; nothing else adds a needed object
+    assert ids == {1, 4}
     assert {a['image_id'] for a in chosen['annotations']} == ids
     assert ff.select_by_quota(coco, {1: 2, 2: 2}, seed=0) == chosen
     assert {i['id'] for i in ff.select_by_quota(coco, {1: 2, 2: 2}, seed=0, exclude=[1])['images']} >= {4}
-    assert {i['id'] for i in ff.select_by_quota(coco, {3: 5}, seed=0)['images']} == {7}  # short of quota: all
+    assert {i['id'] for i in ff.select_by_quota(coco, {3: 5}, seed=0)['images']} == {7}

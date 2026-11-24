@@ -27,7 +27,7 @@ def test_take_stratified_reaches_targets_and_is_deterministic():
     size = {key: (level, n) for key, level, n in units}
     for level, target in (("easy", 10), ("hard", 5)):
         taken = sum(size[k][1] for k in chosen if size[k][0] == level)
-        assert target <= taken < target + 3  # overshoot is less than one unit
+        assert target <= taken < target + 3
     assert chosen != take_stratified(units, {"easy": 10, "hard": 5}, random.Random(4))
 
 

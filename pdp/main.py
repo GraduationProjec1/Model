@@ -8,7 +8,6 @@ from pathlib import Path
 import os
 import sys
 
-# Direct execution from pdp/ (shell runner) also works without an editable package install.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -30,7 +29,6 @@ import runtime
 from autocheckout.io import save_json
 from autocheckout.runinfo import RunInfo
 
-# from transformers import AutoImageProcessor
 from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch import seed_everything
 from datasets.coco_hug import CocoDetection, task_info_coco,task_info_voc,task_info_rpc, create_task_json 
@@ -40,7 +38,6 @@ from models.image_processing_deformable_detr import DeformableDetrImageProcessor
 def get_args_parser():
     parser = argparse.ArgumentParser('MD-DETR', add_help=False)
 
-    # Learning rate and optimizer parameters
     parser.add_argument('--lr', default=2e-4, type=float, 
                         help='Initial learning rate for training')
     parser.add_argument('--new_params', default="", type=str, 
@@ -58,7 +55,6 @@ def get_args_parser():
     parser.add_argument('--lr_linear_proj_mult', default=0.1, type=float, 
                         help='Multiplier for the learning rate on linear projection layers')
 
-    # Batch, classes, and regularization parameters
     parser.add_argument('--batch_size', default=6, type=int, 
                         help='Batch size for training')
     parser.add_argument('--n_classes', default=80, type=int, 
@@ -66,7 +62,6 @@ def get_args_parser():
     parser.add_argument('--weight_decay', default=1e-4, type=float, 
                         help='Weight decay for optimizer regularization')
 
-    # Epoch settings
     parser.add_argument('--epochs', default=51, type=int, 
                         help='Total number of training epochs')
     parser.add_argument('--eval_epochs', default=2, type=int, 
@@ -85,7 +80,6 @@ def get_args_parser():
     parser.add_argument('--verify_resume', type=int, default=0,
                         help='Hash-check restored model, optimizer, scheduler and PDP memory')
 
-    # Learning rate schedule
     parser.add_argument('--lr_drop', default=40, type=int, 
                         help='Epoch to drop learning rate')
     parser.add_argument('--save_epochs', default=10, type=int, 
@@ -93,21 +87,17 @@ def get_args_parser():
     parser.add_argument('--lr_drop_epochs', default=None, type=int, nargs='+', 
                         help='List of epochs to drop learning rate')
     
-    # Gradient clipping
     parser.add_argument('--clip_max_norm', default=0.1, type=float, 
                         help='Maximum norm for gradient clipping')
     parser.add_argument('--sgd', action='store_true', 
                         help='Use SGD optimizer instead of AdamW')
 
-    # Hardware and parallelism
     parser.add_argument('--n_gpus', default=4, type=int, 
                         help="Number of GPUs available for training")
 
-    # Visualization
     parser.add_argument("--num_imgs_viz", type=int, default=1, 
                         help="Number of images for visualization during training")
 
-    # Prompt memory-related parameters
     parser.add_argument("--use_prompts", type=int, default=1, 
                         help="Enable or disable use of prompt memory")
     parser.add_argument("--prompt_len", type=int, default=10, 
@@ -121,13 +111,11 @@ def get_args_parser():
     parser.add_argument("--prompt_pool_sz", type=int, default=10, 
                         help="Size of the prompt pool")
 
-    # Variants of Deformable DETR
     parser.add_argument('--with_box_refine', default=False, action='store_true', 
                         help='Enable box refinement in the decoder')
     parser.add_argument('--two_stage', default=False, action='store_true', 
                         help='Enable two-stage Deformable DETR')
 
-    # Matcher cost coefficients
     parser.add_argument('--set_cost_class', default=2, type=float, 
                         help="Coefficient for classification cost in matching")
     parser.add_argument('--set_cost_bbox', default=5, type=float, 
@@ -135,7 +123,6 @@ def get_args_parser():
     parser.add_argument('--set_cost_giou', default=2, type=float, 
                         help="Coefficient for GIoU box cost in matching")
 
-    # Loss coefficients
     parser.add_argument('--mask_loss_coef', default=1, type=float, 
                         help="Coefficient for mask loss")
     parser.add_argument('--dice_loss_coef', default=1, type=float, 
@@ -151,7 +138,6 @@ def get_args_parser():
     parser.add_argument('--focal_alpha', default=0.25, type=float, 
                         help="Alpha parameter for focal loss")
 
-    # Dataset and general training parameters
     parser.add_argument('--output_dir', default='', 
                         help='Directory to save outputs')
     parser.add_argument('--device', default='cuda', 
@@ -173,7 +159,6 @@ def get_args_parser():
     parser.add_argument('--cache_mode', default=False, action='store_true', 
                         help='Cache dataset in memory for faster training')
 
-    # Continual learning setup
     parser.add_argument('--n_tasks', default=4, type=int, 
                         help='Number of tasks for continual learning setup')
     parser.add_argument('--lambda_query', default=0, type=float, 
@@ -193,7 +178,6 @@ def get_args_parser():
     parser.add_argument('--mask_gradients', default=1, type=int, 
                         help='Flag to mask gradients during continual learning')
 
-    # Checkpoint parameters
     parser.add_argument('--checkpoint_dir', default='', 
                         help='Directory to save checkpoints')
     parser.add_argument('--checkpoint_base', default='', 
@@ -201,7 +185,6 @@ def get_args_parser():
     parser.add_argument('--checkpoint_next', default='', 
                         help='Next checkpoint to load')
 
-    # Dataset paths
     parser.add_argument('--num_classes', default=81, type=int, 
                         help='Number of classes including background')
     parser.add_argument('--train_img_dir', default='/ubc/cs/research/shield/datasets/MSCOCO/2017/train2017', type=str, 
@@ -236,7 +219,6 @@ def get_args_parser():
                         help="FULL-SYN F0.3: comma-separated splits written as pred_<split>.npz after each task; 'val' "
                              'keeps the gate rounds away from test (written later with --predict_only 1)')
 
-    # Fixes of the original code (IMPLEMENTATION_PLAN.md 6.3); 0 restores the original behaviour (pilot P1)
     parser.add_argument('--init_new_prompts', default=1, type=int,
                         help='F2: Gram-Schmidt init of the private prompts of each new task')
     parser.add_argument('--ddl_lambda', default=0.15, type=float,
@@ -307,7 +289,6 @@ def get_args_parser():
     parser.add_argument('--require_kernel', default=0, type=int,
                         help='F11: fail if the CUDA kernel of deformable attention cannot be loaded')
 
-    # Bounding box thresholds
     parser.add_argument('--bbox_thresh', default=0.3, type=float, 
                         help='Bounding box threshold for positive detections')
     parser.add_argument('--bg_thres', default=0.7, type=float, 
@@ -315,16 +296,12 @@ def get_args_parser():
     parser.add_argument('--bg_thres_topk', default=5, type=int, 
                         help='Top-K background detections to consider')
 
-    # Pretrained model loading
     parser.add_argument('--big_pretrained', default="", type=str, 
                         help='Path to a larger pretrained model for initialization')
     
     return parser
 
 def make_train_loader(dataset, args):
-    # F12: shuffle explicitly. The original relied on the DistributedSampler that Lightning adds on
-    # several GPUs; on one GPU Lightning keeps a SequentialSampler, i.e. the same order every epoch.
-    # The order stays reproducible through seed_everything().
     return DataLoader(dataset, collate_fn=dataset.collate_fn, batch_size=args.batch_size,
                       num_workers=args.num_workers, pin_memory=True, shuffle=bool(args.shuffle))
 
@@ -343,8 +320,6 @@ def setup_task_info(args):
     """Fill args.task_map, args.task_label2name and args.task_num_classes."""
     if args.task_config:
         args.task_map, args.task_label2name = task_info_rpc(args.task_config)
-        # Pool sizes come from every task of the config (incl. reserved ones), not only the n_tasks
-        # being run, so the private pool has one slot per class slot of the model (F1).
         args.task_num_classes = [args.task_map[task_id][2] for task_id in sorted(args.task_map)]
         n_slots = sum(args.task_num_classes)
         if args.n_classes != n_slots + 1:
@@ -352,7 +327,6 @@ def setup_task_info(args):
     else:
         args.task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
         args.task_num_classes =  [args.task_map[task_id][2] for task_id in range(1, args.n_tasks + 1)]
-    #print(args.task_num_classes)
     args.task_label2name[args.n_classes-1] = "BG"
 
 def task_dir(output_root, task_id):
@@ -403,7 +377,6 @@ def run_task(args, task_id, output_root, processor=None):
     tr_ann = os.path.join(args.task_ann_dir, train_name)
     val_ann = os.path.join(args.task_ann_dir, 'val_full.json' if args.joint else f'val_task_{task_id}.json')
 
-    # R3: provenance of this session (code, environment, data checksums); closed at the end
     run_info = RunInfo(os.path.join(args.output_dir, 'run_info.json'))
     run_info.start(vars(args), repo_root=REPO_ROOT, files={
         'task_config': args.task_config, 'train': None if args.predict_only else tr_ann, 'val_task': val_ann,
@@ -440,25 +413,17 @@ def run_task(args, task_id, output_root, processor=None):
     if args.predict_only:
         trainer.resume(final_path)
     else:
-        # F8: task t starts from the final weights of task t-1 (explicit --prev_ckpt, or the previous
-        # task of this run); task 1 starts from --repo_name. resume() also applies --freeze.
         if task_id > 1 and not args.joint:
             trainer.resume(prev_ckpt)
         else:
             trainer.resume()
 
-        # F5: teacher = frozen copy of the model after the previous task, taken before the new
-        # task's prompts are initialised.
         if task_id > 1 and args.pseudo != 'none' and not args.joint:
             trainer.set_teacher()
 
-        # F2: must run after set_task_id() and after the previous weights are loaded (loading would
-        # otherwise overwrite the new slots with the zeros saved at the end of the previous task).
         if args.use_prompts and args.init_new_prompts:
             trainer.model.model.prompts.init_task_prompts()
 
-        # R1: continue an interrupted task from its last.ckpt (weights, optimizer, scheduler, loop
-        # state, prototype memory); the steps above are cheap and keep the teacher correct.
         if ckpt_path:
             print(f'Resuming task {task_id} from {ckpt_path}', file=args.log_file)
         lightning = make_pl_trainer(args)
@@ -514,7 +479,6 @@ def main(args):
     runtime.accumulation_steps(args)
 
     if args.joint:
-        # B1/E0: task n_tasks covers every data class of tasks 1..n_tasks (PREV = 0), trained at once
         names = [name for t in range(1, args.n_tasks + 1) for name in args.task_map[t][0]]
         args.task_map[args.n_tasks] = (names, 0, len(names))
         args.start_task = args.n_tasks

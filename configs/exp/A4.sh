@@ -1,4 +1,3 @@
-# A4 (ablation of E4, 3 tasks): top-5 teacher queries instead of 50.
 source "$REPO/configs/exp/common.sh"
 EXP=A4
 N_TASKS=3

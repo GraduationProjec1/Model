@@ -27,8 +27,8 @@ from autocheckout.predictions import Predictions, load_predictions, save_predict
 from autocheckout.taskcfg import TaskConfig
 
 MODES = ("merge", "alias_only")
-GAIN = {6: 0.0165, 7: 0.03}  # cAcc-M2 gain over the seed required after task 6 and task 7 (Q10)
-OTHER_DROP = 0.01  # largest fall of the AP50 of the 150 SKUs not relearned
+GAIN = {6: 0.0165, 7: 0.03}
+OTHER_DROP = 0.01
 
 
 def alias_val_file(val_full: dict[str, Any], cfg: TaskConfig, task_id: int) -> dict[str, Any]:
@@ -97,7 +97,7 @@ def resolve_run(run: Path, stage: int, cfg: TaskConfig, target: Path, *, mode: s
 def relearn_verdict(report: dict[str, Any], seed: dict[str, Any], stage: int) -> tuple[str, str]:
     """Gate after relearn task ``stage``: cAcc-M2 must rise by GAIN[stage] over the seed and the AP50 of the SKUs
     not relearned fall by at most OTHER_DROP. Returns (go | stop, reason naming the failed gates)."""
-    gain = round(report["cAcc_m2"] - seed["cAcc_m2"], 6)  # compared after rounding, as pilot_verdict
+    gain = round(report["cAcc_m2"] - seed["cAcc_m2"], 6)
     drop = round(seed["AP50_other"] - report["AP50_other"], 6)
     scores = (f"cAcc-M2 {seed['cAcc_m2']:.4f} -> {report['cAcc_m2']:.4f} ({gain:+.4f}, needs {GAIN[stage]:+.4f}); "
               f"AP50 of the other SKUs {seed['AP50_other']:.4f} -> {report['AP50_other']:.4f} "
@@ -155,12 +155,11 @@ def per_sku_accuracy(coco, counted: Predictions, thresholds: np.ndarray, seen: i
                     "extra_boxes": extra[label]} for label in range(seen)}
 
 
-# --- campaign ------------------------------------------------------------------------------------------------------
 RELEARN = 'EXP-FULL-SYN-RL'
 RELEARN_TASKS = (6, 7)
 SEED_LOCKED = ('resolution', 'batch_size', 'effective_batch', 'epochs', 'tf32', 'num_workers',
-               'checkpoint_every_minutes')  # the training recipe of the seed round, kept as it is
-DRY_GROUPS = [[1], [3]]  # dry run: tasks 6 and 7 relearn labels 1 and 3 of the six-label fixture
+               'checkpoint_every_minutes')
+DRY_GROUPS = [[1], [3]]
 
 
 def relearn_tasks(cfg: TaskConfig, seed_cfg: TaskConfig) -> list[int]:

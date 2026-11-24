@@ -60,11 +60,11 @@ def audit(trainer, loader, config, device):
     prev = trainer.PREV_INTRODUCED_CLS
     args = trainer.args
     supercategory = {c.label: c.supercategory or 'reserved' for t in config.tasks for c in t.classes}
-    branch = defaultdict(Counter)       # branch -> outcome counts
-    by_super = defaultdict(Counter)     # supercategory of the annotated class -> tp / missed
-    confusions = Counter()              # (pseudo label, true label) of wrong-class pseudo-labels
+    branch = defaultdict(Counter)
+    by_super = defaultdict(Counter)
+    confusions = Counter()
     old_objects = 0
-    filters = Counter()                 # selected pseudo-labels, and those dropped by I3 / F14 (F0.6)
+    filters = Counter()
     prototypes, valid = prototype_matrix(trainer.class_prototypes, prev, device)
     for batch in loader:
         pixels, mask = batch['pixel_values'].to(device), batch['pixel_mask'].to(device)

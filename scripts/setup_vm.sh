@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# One-time environment setup on the VM (T0.3, T0.4); safe to run again.
-#
-#   bash ~/AutoCheckout-CL/scripts/setup_vm.sh
-#
-# Creates /data/rpc and /data/runs, the Python venv (torch 2.2.2 + CUDA 12.1 wheels, pinned
-# requirements, this repo in editable mode), builds the deformable-attention CUDA kernel for the L4
-# (sm_89) and runs the test suite, including the kernel tests that are skipped on the Mac.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 VENV=${VENV:-$HOME/venvs/pdp}
@@ -13,7 +6,6 @@ VENV=${VENV:-$HOME/venvs/pdp}
 sudo mkdir -p /data/rpc /data/runs
 sudo chmod 1777 /data /data/rpc /data/runs
 
-# The image has nvcc but neither a C++ compiler nor the Python headers, both needed to build the kernel
 PACKAGES=(python3.10-venv python3.10-dev build-essential unzip tmux)
 if ! dpkg -s "${PACKAGES[@]}" >/dev/null 2>&1; then
     sudo apt-get update -qq && sudo apt-get install -y -qq "${PACKAGES[@]}"

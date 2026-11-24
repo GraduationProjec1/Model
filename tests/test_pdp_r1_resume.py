@@ -22,7 +22,7 @@ def test_resume_after_interruption_in_the_last_epoch(tmp_path, monkeypatch):
     original_step = engine.local_trainer.training_step
 
     def failing_step(self, batch, batch_idx):
-        if self.current_epoch == 2 and batch_idx == 2:  # after the prototype memory got its first update
+        if self.current_epoch == 2 and batch_idx == 2:
             raise Interrupted
         return original_step(self, batch, batch_idx)
 
@@ -49,8 +49,6 @@ def test_resume_after_interruption_in_the_last_epoch(tmp_path, monkeypatch):
                         lambda self: resumed.update(final_step=self.trainer.global_step), raising=False)
     run_main(tmp_path, monkeypatch, *ARGS)
 
-    # The interrupted epoch continues with its remaining number of batches (in a new shuffled order:
-    # the exact data order is not restored), so the total number of optimizer steps is unchanged.
     n_images = len(json.loads((tmp_path / "data/tasks/train_task_1.json").read_text())["images"])
     assert resumed["final_step"] == 3 * math.ceil(n_images / 2)
 

@@ -36,7 +36,6 @@ def assert_same_outputs(got, expected):
         assert torch.equal(getattr(got, name), getattr(expected, name)), name
 
 
-# --- Task 3: backbone features computed outside the forward ----------------------------------------------------
 def test_forward_with_precomputed_backbone_matches_forward(task1_model):
     batch = padded_batch()
     pixels, mask = batch["pixel_values"], batch["pixel_mask"]
@@ -44,7 +43,6 @@ def test_forward_with_precomputed_backbone_matches_forward(task1_model):
         expected = task1_model(pixel_values=pixels, pixel_mask=mask, train=False)
         features = task1_model.model.extract_features(pixels, mask)
         got = task1_model(pixel_values=pixels, pixel_mask=mask, backbone_features=features, train=False)
-        # the prompted pass too
         query = expected.last_hidden_state
         expected_2 = task1_model(pixel_values=pixels, pixel_mask=mask, query=query, train=False)
         got_2 = task1_model(pixel_values=pixels, pixel_mask=mask, query=query, backbone_features=features,
@@ -71,7 +69,6 @@ def test_backbone_features_not_mutated(task1_model):
         levels = len(features.features)
         positions = [p.clone() for p in features.position_embeddings]
         task1_model(pixel_values=pixels, pixel_mask=mask, backbone_features=features, train=False)
-    # the extra (4th) level is built from a new list, never appended to the shared one (modeling line 1722)
     assert len(features.features) == levels
     assert len(features.position_embeddings) == len(positions)
     assert all(torch.equal(a, b) for a, b in zip(features.position_embeddings, positions, strict=True))
@@ -95,7 +92,6 @@ def test_convnext_backbone_deterministic_in_train_mode(tmp_path, monkeypatch):
     assert all(torch.equal(a, b) for a, b in zip(first.position_embeddings, second.position_embeddings, strict=True))
 
 
-# --- Task 4: two passes with the backbone and encoder computed once (eval only) -----------------------------
 def old_two_passes(model, pixels, mask, *, use_prompts, local_query, first_task_id=None, second_task_id=None):
     """The two passes as the code did them before P1 (both run the whole model)."""
     first = model(pixel_values=pixels, pixel_mask=mask, train=False, task_id=first_task_id)
@@ -138,7 +134,6 @@ def test_predict_batch_contract_unchanged_and_reuse_matches(task1_model):
 
     batch = padded_batch()
     sizes = torch.tensor([[96, 96], [76, 84]])
-    # the call of checkout-system/docs/ac-contract.md: positional model, pixels, mask, sizes + 3 keywords
     old = predict_batch(task1_model, batch["pixel_values"], batch["pixel_mask"], sizes, use_prompts=True,
                         local_query=True, seen_classes=3)
     new = predict_batch(task1_model, batch["pixel_values"], batch["pixel_mask"], sizes, use_prompts=True,
@@ -161,7 +156,7 @@ def test_write_predictions_reuse_matches(tmp_path, monkeypatch):
         (tmp_path / reuse).mkdir()
         args = pdp_args(tmp_path / reuse, "--reuse_features", reuse, "--test_img_dir", str(data["images"]),
                         "--batch_size", "2", "--num_workers", "0")
-        torch.manual_seed(0)  # same random weights for both models
+        torch.manual_seed(0)
         model = make_trainer(args, task_id=1).model
         files[reuse] = tmp_path / f"pred_{reuse}.npz"
         write_predictions(model, args, ann_file=data["tasks"] / "val_full.json", out_file=files[reuse], task_id=1,
@@ -209,7 +204,6 @@ def test_reuse_runs_backbone_and_encoder_once(task1_model, reuse_features, expec
     assert (calls["backbone"], calls["encoder"], calls["decoder"]) == expected
 
 
-# --- Task 5: training step shares the backbone; startup guard; no wasted loss in the first student pass ------
 def sub(tmp_path, name):
     path = tmp_path / name
     path.mkdir(exist_ok=True)
@@ -218,14 +212,14 @@ def sub(tmp_path, name):
 
 def train_steps(args, task_id, *, steps=2, batches=None):
     """Losses and the gradients of every trained parameter over a few real optimizer steps (seeded)."""
-    torch.manual_seed(0)  # same random weights for every call
+    torch.manual_seed(0)
     trainer = make_trainer(args, task_id=task_id)
     if task_id > 1 and args.pseudo != "none":
         trainer.set_teacher()
     trainer.train()
     optimizer = trainer.configure_optimizers()["optimizer"]
     batches = batches or [padded_batch(), make_batch([[2], [0, 1]], seed=1)]
-    torch.manual_seed(1)  # same dropout masks
+    torch.manual_seed(1)
     losses, grads = [], []
     for step in range(steps):
         loss, _ = trainer.common_step(batches[step % len(batches)], step)
@@ -262,16 +256,13 @@ def test_input_proj_and_level_embed_receive_gradient(tmp_path, monkeypatch):
     _, grads, _ = train_steps(pdp_args(tmp_path, "--reuse_features", "1"), 2, steps=1)
     proj = [n for n in grads[0] if "input_proj" in n]
     assert proj and all(grads[0][n].abs().sum() > 0 for n in proj)
-    # level_embed only reaches the loss through the encoder's sampling_offsets / attention_weights, which the
-    # untrained toy model initialises to zero (Deformable DETR init), so its gradient is 0 here even before P1.
-    # It must still be connected to the graph; equal values with and without P1: test_training_unchanged_with_reuse.
     assert "model.model.level_embed" in grads[0]
 
 
 def test_backbone_runs_once_per_training_step(tmp_path, monkeypatch):
     use_tiny_detr(monkeypatch)
     calls = []
-    for reuse, expected in (("0", 4), ("1", 1)):  # teacher 2 passes + student 2 passes, or once for all
+    for reuse, expected in (("0", 4), ("1", 1)):
         args = pdp_args(sub(tmp_path, reuse), "--reuse_features", reuse)
         trainer = make_trainer(args, task_id=2)
         trainer.set_teacher()
@@ -302,7 +293,6 @@ def test_reuse_rejects_trainable_backbone_at_startup(tmp_path, monkeypatch):
     args = pdp_args(tmp_path, "--reuse_features", "1", "--tune_after_task1", "layer4,encoder")
     with pytest.raises(ValueError, match="reuse_features"):
         make_trainer(args, task_id=1)
-    # the same run without the flag is accepted
     make_trainer(pdp_args(sub(tmp_path, "off"), "--tune_after_task1", "layer4,encoder"), task_id=1)
 
 
@@ -314,7 +304,7 @@ def test_student_first_pass_without_labels(tmp_path, monkeypatch):
     forward = trainer.model.forward
     monkeypatch.setattr(trainer.model, "forward", lambda *a, **k: seen.append(k.get("labels")) or forward(*a, **k))
     trainer.common_step(padded_batch(), 0)
-    assert seen[0] is None and seen[-1] is not None  # query pass: no loss; training pass: loss
+    assert seen[0] is None and seen[-1] is not None
 
 
 def test_mode_improve_args_unchanged_with_reuse(tmp_path, monkeypatch):

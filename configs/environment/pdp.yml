@@ -1,6 +1,3 @@
-# Create from the repo root. Python and pip as in the working `pdp` environment (conda-forge, 30/10/2026).
-# After activation, install either requirements-lock-cu121.txt (exact snapshot, GPU machines) or Torch from the
-# CPU/cu121 index and then requirements.txt (docs/environment/README.md).
 name: pdp
 channels:
   - conda-forge

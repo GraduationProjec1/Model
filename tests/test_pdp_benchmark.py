@@ -31,10 +31,9 @@ def test_train_and_infer_modes(tmp_path, monkeypatch):
     infer = benchmark.bench_infer(args, torch.device("cpu"))
     assert infer[f"ms_per_image_{IMAGE_SIZE}"] > 0
     storage = benchmark.storage_per_class(args)
-    assert storage["prototype_memory_bytes_per_class"] == 100 * 1024  # 100 KiB, as in the plan (V5)
+    assert storage["prototype_memory_bytes_per_class"] == 100 * 1024
 
 
-# --- P1/P2 (docs/design/2026-11-22-toi-uu-2-luot, Task 1): stage timings, data loading, image ids -------------
 def test_random_batch_has_unique_image_ids():
     generator = torch.Generator().manual_seed(0)
     cpu = torch.device("cpu")
@@ -51,10 +50,8 @@ def test_stages_mode_reports_backbone_encoder_decoder(tmp_path, monkeypatch):
     assert result["mode"] == "stages"
     parts = [result[key] for key in ("backbone_ms", "encoder_ms", "decoder_ms")]
     assert all(part > 0 for part in parts)
-    # the three stages are timed inside the same first pass, so they cannot exceed it
     assert sum(parts) <= result["pass1_ms"]
     assert result["pass2_ms"] > 0
-    # each reported number is rounded to 3 decimals (off by up to 0.0005), so this sum is off by up to 0.0015
     assert result["removed_ms_infer"] == pytest.approx(result["backbone_ms"] + result["encoder_ms"], abs=2e-3)
     assert 0 < result["predicted_infer_saving"] < 1
     for key in ("removed_ms_train_epoch1", "removed_ms_train_cached", "removed_ms_train_no_teacher"):

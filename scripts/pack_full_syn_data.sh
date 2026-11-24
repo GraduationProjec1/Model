@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
-# Pack the data the FULL-SYN run needs on the GPU machine into one tar, to upload to Google Drive (plan 4.1).
-#
-#   bash scripts/pack_full_syn_data.sh [synthetic release]
-#
-# Writes data/packages/<name>.tar and its receipts in data/packages/<name>/ (SHA256SUMS of every file, also
-# inside the tar; tar.md5, the md5 Drive must report for the tar), then prints the upload commands. Paths in the
-# tar are relative to the repo root: extract it at the repo root on the GPU machine, then run
-# `sha256sum -c data/packages/<name>/SHA256SUMS` there. Hashing takes long; an existing SHA256SUMS is reused.
 set -euo pipefail
 RELEASE=${1:-rpc_synth_v2_v1}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 NAME=full_syn_${RELEASE}_$(date +%Y%m%d)
 RECEIPTS=data/packages/$NAME
-# Plan section 2: labels/, owner_masks/ and annotations/ of the release are not needed for training.
 PATHS=(
     data/processed/$RELEASE/images
     data/processed/$RELEASE/tasks

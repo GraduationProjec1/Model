@@ -15,8 +15,6 @@ from conftest import REPO_ROOT
 R3_REAL, R3_ALL = 'al_margin_k_B500_r3_real', 'al_margin_k_B500_r3_all'
 S1, R4 = 'al_margin_k_B500_r3_real_s1', 'al_margin_k_B500_r4'
 
-# python giả: ghi lại lệnh; FAIL_TEST / FAIL_AL = các run lỗi ở final_test / stage al; al_score --test-pred lỗi khi
-# scored_test/<run>.json đã có (như tools/al_score.py).
 FAKE_PYTHON = r"""#!/bin/bash
 echo "$*" >> "$CALLS"
 [[ $1 == -m ]] || exit 0
@@ -59,7 +57,7 @@ def _repo(tmp_path: Path, *scripts: str) -> Path:
     for script in scripts:
         shutil.copy(REPO_ROOT / 'scripts' / script, repo / 'scripts' / script)
     data = tmp_path / 'data'
-    for v in (R3_REAL, R3_ALL, S1, R4):  # gói dựng sẵn: run_al.sh không gọi al_build_variant / al_round2
+    for v in (R3_REAL, R3_ALL, S1, R4):
         (data / 'relearn/variants' / v).mkdir(parents=True)
         (data / 'relearn/variants' / v / 'train_task_5_fix.json').write_text('{}')
     return repo
@@ -72,7 +70,7 @@ def _env(tmp_path: Path, repo: Path, **extra: str) -> dict:
     (bin_dir / 'git').write_text('#!/bin/bash\nexit 0\n')
     for tool in ('python', 'git'):
         (bin_dir / tool).chmod(0o755)
-    path = f'{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin'  # không có rclone, vastai: không đồng bộ, không hủy máy
+    path = f'{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin'
     return {'PATH': path, 'HOME': str(tmp_path), 'CALLS': str(tmp_path / 'calls.txt'),
             'AC_DATA': str(tmp_path / 'data'), 'REPO_UNDER_TEST': str(repo), **extra}
 
@@ -89,7 +87,6 @@ def _calls(tmp_path: Path, module: str) -> list[str]:
     return [line for line in lines if f'-m {module}' in line]
 
 
-# --- run_al.sh test (B0) --------------------------------------------------------------------------------------------
 def test_b0_rerun_skips_the_test2019_score_already_written(tmp_path):
     """B0 bị ngắt sau khi chấm r3_real: chạy lại đúng lệnh thì r3_real bỏ qua al_score, r3_all vẫn được chấm."""
     scored_test = tmp_path / 'data/relearn/active/scored_test'
@@ -111,14 +108,13 @@ def test_b0_failure_of_one_model_still_scores_the_other_and_exits_nonzero(tmp_pa
     assert f'[LỖI] {R3_REAL}' in result.stdout + result.stderr
 
 
-# --- run_al.sh train (B4, B1) ---------------------------------------------------------------------------------------
 def test_a_failed_training_does_not_stop_the_next_run_but_fails_the_command(tmp_path):
     result = _run_al(tmp_path, S1, R4, FAIL_AL=S1)
     assert result.returncode != 0
     trained = [c for c in _calls(tmp_path, 'autocheckout.update_model') if '--stage al' in c]
     assert len(trained) == 2 and R4 in trained[1]
     scores = _calls(tmp_path, 'tools.al_score')
-    assert len(scores) == 1 and R4 in scores[0]  # run lỗi không được chấm
+    assert len(scores) == 1 and R4 in scores[0]
     assert f'[LỖI] {S1}' in result.stdout + result.stderr
 
 
@@ -138,7 +134,6 @@ def test_a_stale_prediction_without_a_stage_is_not_scored(tmp_path):
     assert result.returncode != 0 and _calls(tmp_path, 'tools.al_score') == []
 
 
-# --- vast_train_and_sync.sh al_r4 -----------------------------------------------------------------------------------
 FAKE_RUN_AL = r"""#!/bin/bash
 echo "run_al $*" >> "$CALLS"
 for pattern in ${FAIL_STEP:-}; do [[ " $* " == *" $pattern "* ]] && exit 1; done

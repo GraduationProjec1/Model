@@ -54,7 +54,6 @@ class TaskConfig:
     def __post_init__(self) -> None:
         self._validate()
 
-    # --- sizes -------------------------------------------------------------------------
     @property
     def num_slots(self) -> int:
         """Number of class slots (all tasks, including reserved ones)."""
@@ -70,7 +69,6 @@ class TaskConfig:
         """Tasks that have RPC data (reserved tasks excluded)."""
         return tuple(t for t in self.tasks if not t.reserved)
 
-    # --- lookups -----------------------------------------------------------------------
     def task(self, task_id: int) -> Task:
         if not 1 <= task_id <= len(self.tasks):
             raise KeyError(f"task {task_id} not in config {self.name!r} (1..{len(self.tasks)})")
@@ -112,7 +110,6 @@ class TaskConfig:
     def label_names(self) -> dict[int, str]:
         return {c.label: c.name for t in self.tasks for c in t.classes}
 
-    # --- (de)serialisation ---------------------------------------------------------------
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TaskConfig:
         tasks = tuple(
@@ -160,14 +157,13 @@ class TaskConfig:
     def save(self, path: str | os.PathLike) -> None:
         save_json(path, self.to_dict(), indent=1)
 
-    # --- checks --------------------------------------------------------------------------
     def _validate(self) -> None:
         if not self.tasks:
             raise ValueError("task config has no tasks")
         expected_offset = 0
         seen_reserved = False
         rpc_ids: set[int] = set()
-        earlier: dict[int, ClassInfo] = {}          # classes of the tasks before the current one
+        earlier: dict[int, ClassInfo] = {}
         for index, task in enumerate(self.tasks, start=1):
             if task.task_id != index:
                 raise ValueError(f"task ids must be 1..N in order, got {task.task_id} at position {index}")

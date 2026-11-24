@@ -4,8 +4,6 @@ from autocheckout.predictions import Predictions, load_predictions, save_predict
 
 
 def toy_predictions():
-    # image 1: query 0 has two classes (0.9 for label 2, 0.3 for label 1); query 5 one class.
-    # image 2: query 0 has two classes, the best one listed second.
     return Predictions(
         image_id=[1, 1, 1, 2, 2],
         query=[0, 0, 5, 0, 0],

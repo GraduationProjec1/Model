@@ -22,8 +22,6 @@ def _write_run(tmp_path):
     save_json(ann_path, gt)
     ann_md5 = md5_file(ann_path)
 
-    # A real model's predictions at stage t cover every class learned so far, not just the
-    # newest task; stage 2's file must still detect stage 1's object for mAP@P to be meaningful.
     run_dir = tmp_path / "run"
     stage_rows = {1: [(1, 0, 0)], 2: [(1, 0, 0), (2, 0, 2)]}
     for stage, rows in stage_rows.items():
@@ -67,7 +65,6 @@ def test_main_writes_metrics_file(tmp_path, monkeypatch, capsys):
 
 def test_ann_md5_mismatch_is_refused(tmp_path):
     run_dir, ann_path, cfg_path = _write_run(tmp_path)
-    # Corrupt the annotation file after predictions were generated against the original.
     gt = load_json(ann_path)
     gt["images"].append({"id": 99, "file_name": "extra.jpg", "width": 800, "height": 800, "level": "easy"})
     save_json(ann_path, gt)

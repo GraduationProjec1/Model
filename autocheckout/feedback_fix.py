@@ -52,7 +52,7 @@ def split_val(val: Coco, seed: int) -> tuple[Coco, Coco]:
         keys_of_level = by_level[name]
         rng.shuffle(keys_of_level)
         counts = [0, 0]
-        for key in sorted(keys_of_level, key=lambda k: -len(groups[k])):  # large groups first, stable after shuffle
+        for key in sorted(keys_of_level, key=lambda k: -len(groups[k])):
             side = 0 if counts[0] <= counts[1] else 1
             halves[side].extend(groups[key])
             counts[side] += len(groups[key])

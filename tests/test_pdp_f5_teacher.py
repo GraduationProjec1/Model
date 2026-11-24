@@ -30,7 +30,6 @@ def test_teacher_is_frozen_and_not_part_of_the_module(task2_trainer):
     assert not any(p.requires_grad for p in teacher.parameters())
     assert not any(name.startswith("teacher") for name in task2_trainer.state_dict())
     assert sum(p.numel() for p in task2_trainer.parameters()) == sum(p.numel() for p in teacher.parameters())
-    # teacher uses the prompts of task 1 only; the student those of tasks 1-2
     assert teacher.model.prompts.task_count == 0
     assert task2_trainer.model.model.prompts.task_count == 1
 

@@ -16,16 +16,15 @@ def test_sku_multiset_ignores_order():
 
 def test_group_keys_union_by_suffix_and_multiset():
     a, b, c = sku_multiset([1, 2]), sku_multiset([3]), sku_multiset([4, 4])
-    names = ["20180101-10-00-00-5.jpg",   # 0: suffix 5
-             "20180101-10-00-11-5.jpg",   # 1: suffix 5, other basket -> same group as 0
-             "20180102-09-00-00-12.jpg",  # 2: suffix 12, same multiset as 1 -> joins 0/1
-             "20180103-09-00-00-30.jpg",  # 3: suffix 30, own basket
-             "20180103-09-00-11-40.jpg",  # 4: empty image
-             "20180103-09-00-22-41.jpg"]  # 5: empty image, must not merge with 4
+    names = ["20180101-10-00-00-5.jpg",
+             "20180101-10-00-11-5.jpg",
+             "20180102-09-00-00-12.jpg",
+             "20180103-09-00-00-30.jpg",
+             "20180103-09-00-11-40.jpg",
+             "20180103-09-00-22-41.jpg"]
     multisets = [a, b, b, c, (), ()]
     keys = group_keys(names, multisets)
     assert keys == ["g5", "g5", "g5", "g30", "g40", "g41"]
-    # Keys do not depend on the input order.
     order = [5, 3, 1, 4, 2, 0]
     assert group_keys([names[i] for i in order], [multisets[i] for i in order]) == [keys[i] for i in order]
 

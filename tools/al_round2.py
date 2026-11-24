@@ -27,9 +27,9 @@ from autocheckout.predictions import load_predictions
 from tools import al_build_variant
 
 DEFAULT_CAMPAIGN = REPO / 'data/training/update-model/relearn-fix-v2'
-R4_FROM = 'al_%s_r3_real'  # the only round-3 run a round-4 run may start from (12/11/2026, summary §6)
-R4_REPEAT = 6  # 1,500 real images x 6 keep real at ~46% of the samples, as the 1,000 x 8 of r3_real
-BOOKKEEPING = ('round', 'from', 'round_budget')  # opts of a selection that are not options of select()
+R4_FROM = 'al_%s_r3_real'
+R4_REPEAT = 6
+BOOKKEEPING = ('round', 'from', 'round_budget')
 R4_BUILD = dict(base='e1', rows=REPO / 'configs/relearn/rows_r3.json', repeat=R4_REPEAT, v2_keep=0.5, no_face_v2=600)
 
 
@@ -58,7 +58,7 @@ def round2(data_root: Path | None, campaign: Path, first: str, budget: int | Non
         raise FileNotFoundError(f'{pred}: train {first} first')
     labelled = list(chosen['image_ids'])
     written = release / f'active/selections/{target}.json'
-    if written.is_file():  # shipped from the machine that selected (--select-only): kept only if nothing changed
+    if written.is_file():
         done = load_json(written)
         opts = done.get('opts', {})
         new = list(done.get('new_image_ids', []))
@@ -90,7 +90,7 @@ def round2(data_root: Path | None, campaign: Path, first: str, budget: int | Non
                    'created_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
                    'image_ids': labelled + new, 'new_image_ids': new,
                    'per_image_score': chosen.get('per_image_score', []) + [by_id[i] for i in new]})
-    if build is None:  # --select-only: the selection on a machine without the relearn release (checked, shipped)
+    if build is None:
         return {'variant': variant, 'selection': target, 'round': round_no, 'labelled_images': len(labelled) + len(new),
                 'new_images': len(new), 'images': None, 'labelled_boxes': None}
     if options:

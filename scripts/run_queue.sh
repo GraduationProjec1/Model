@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Run the experiments listed in $RUNS/queue.txt one after the other, then stop the VM (also after an error).
-#
-#   echo E3 >> /data/runs/queue.txt        # one config name per line (configs/exp/<name>.sh); '#' starts a comment
-#   tmux new -d -s queue 'bash ~/AutoCheckout-CL/scripts/run_queue.sh'
-#
-# The queue file is read again before each experiment, so names can be appended while it runs.
-# A finished experiment gets the line "<name> exit=<status> <date>" in $RUNS/queue.log and is never run
-# again. One killed by a signal (the VM stopping, Spot preemption) gets "<name> interrupted" instead and stops
-# the queue; the same command runs it again later, and run_exp.sh continues it where it stopped. To skip an
-# experiment, delete its line from queue.txt. Output of each experiment: $RUNS/<name>.log.
-# queue.log ends with "queue empty" only when every queued experiment is finished; "queue stopped" is
-# written whenever the script exits, just before the VM is stopped.
 set -uo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 RUNS=${RUNS:-/data/runs}

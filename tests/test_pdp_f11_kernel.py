@@ -10,7 +10,7 @@ import pytest
 import torch
 
 import models.modeling_deformable_detr as detr_module
-from models.load_custom import load_cuda_kernels  # noqa: F401  (import must succeed everywhere)
+from models.load_custom import load_cuda_kernels  # noqa: F401
 
 cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 

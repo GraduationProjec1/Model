@@ -24,7 +24,7 @@ def test_fit_scores_splits_val_a(monkeypatch):
     seen = []
     monkeypatch.setattr(fit_check, 'count_on', fake_count_on(seen))
     r = fit_check.fit_scores({}, None, PREDS, SPLIT, [3, 4, 5, 99], thresholds=[0.1] * 5)
-    assert [ids for ids, _ in seen] == [(3, 4, 5), (6,), (1, 2)]  # 99 is not in the pool: ignored
+    assert [ids for ids, _ in seen] == [(3, 4, 5), (6,), (1, 2)]
     assert {t for _, t in seen} == {(0.1,) * 5}
     assert (r['images_trained'], r['images_pool_untrained'], r['images_calib']) == (3, 1, 2)
     assert r['cAcc_trained'] == pytest.approx(0.3)

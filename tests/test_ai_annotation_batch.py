@@ -129,7 +129,6 @@ def test_incomplete_wrong_model_missing_and_api_failures_are_not_accepted(tmp_pa
     rows[2] = {'custom_id': rows[2]['custom_id'], 'response': None, 'error': {'code': 'expired'}}
     accepted, rejected = batch.parse_outputs(manifest, rows, batch_ids=['batch_test'])
     assert not accepted and len(rejected) == 4
-    # An incomplete response is still billed and must keep usage/cost in its rejected receipt.
     assert rejected[0]['estimated_cost_usd'] == pytest.approx(.003075)
 
 

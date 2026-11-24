@@ -40,7 +40,6 @@ class _FakeRecall(_Fake):
 
 
 def test_sku_threshold_rejected_when_recall_drops():
-    # 0.4 removes both boxes on no object (+1 right image) but also the real object: recall 1 -> 0
     fake, vec = _FakeRecall(), np.array([0.2])
     assert add_sku_thresholds(fake, vec, [0], [0.2, 0.4], min_gain=1)[1] == {0: 0.4}
     assert add_sku_thresholds(fake, vec, [0], [0.2, 0.4], min_gain=1, max_recall_drop=0.02)[1] == {}

@@ -19,17 +19,17 @@ def comparison(fixed=30, broken=10, p=0.001, pairs=(100, 50), falls=0, largest=(
 
 @pytest.mark.parametrize('name, cacc, cmp, ap, decision', [
     ('pilot', 0.44, comparison(), 0.96, 'go'),
-    ('pilot', 0.4368, comparison(), 0.96, 'stop'),                      # pilot needs a strict gain
-    ('e1', 0.452, comparison(), 0.96, 'stop'),                          # +0.0152 < +0.0165
+    ('pilot', 0.4368, comparison(), 0.96, 'stop'),
+    ('e1', 0.452, comparison(), 0.96, 'stop'),
     ('e1', 0.4534, comparison(), 0.96, 'go'),
-    ('e1', 0.46, comparison(p=0.2), 0.96, 'stop'),                      # sign test
-    ('e1', 0.46, comparison(pairs=(100, 80)), 0.96, 'stop'),            # pairs fell 20% only (needs 25%)
-    ('e1', 0.46, comparison(pairs=(100, 75)), 0.96, 'go'),              # pairs fell 25%
-    ('e1', 0.46, comparison(), 0.955, 'stop'),                          # AP50 of the other SKUs fell 1.4 points
-    ('e1', 0.46, comparison(falls=11), 0.96, 'stop'),                   # 12/11/2026: at most 10 SKUs may fall
+    ('e1', 0.46, comparison(p=0.2), 0.96, 'stop'),
+    ('e1', 0.46, comparison(pairs=(100, 80)), 0.96, 'stop'),
+    ('e1', 0.46, comparison(pairs=(100, 75)), 0.96, 'go'),
+    ('e1', 0.46, comparison(), 0.955, 'stop'),
+    ('e1', 0.46, comparison(falls=11), 0.96, 'stop'),
     ('e1', 0.46, comparison(falls=10), 0.96, 'go'),
-    ('pilot', 0.44, comparison(falls=9), 0.96, 'go'),                   # al_margin_k_B500_r3_real under the old rule
-    ('pilot', 0.44, comparison(falls=17), 0.96, 'stop'),                # al_margin_k_B500_r3_train
+    ('pilot', 0.44, comparison(falls=9), 0.96, 'go'),
+    ('pilot', 0.44, comparison(falls=17), 0.96, 'stop'),
 ])
 def test_verdict_checks_every_condition_of_the_gate(name, cacc, cmp, ap, decision):
     assert um.verdict(um.GATES[name], 0.4368, cacc, cmp, 0.969, ap)[0] == decision
@@ -41,7 +41,6 @@ def test_round2_needs_no_sign_test_and_a_10_percent_pair_fall():
     assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 45)), 0.96, 0.958)[0] == 'go'
     assert um.verdict(gate, 0.46, 0.46, comparison(pairs=(50, 46)), 0.96, 0.96)[0] == 'stop'
     assert um.verdict(gate, 0.46, 0.46, comparison(p=0.9, pairs=(50, 45), falls=11), 0.96, 0.96)[0] == 'stop'
-    # al_margin_k_B500_r2 (stage file): pairs 201 -> 168 (16 %), 162<->186 103 -> 99: stopped under 0.25, goes now
     assert um.verdict(gate, 0.5406, 0.5678, comparison(p=1e-6, pairs=(201, 168), largest=(103, 99)),
                       0.96, 0.96)[0] == 'go'
 
@@ -57,21 +56,21 @@ def test_later_round_gates_follow_the_pilot_gate_with_a_10_percent_pair_fall():
 
 
 @pytest.mark.parametrize('kind, pairs, decision', [
-    ('pilot', (100, 80), 'stop'),        # first round: 20 % < 25 %
-    ('r3_strong', (100, 85), 'go'),      # later round: 15 % >= 10 %
-    ('r3_strong', (100, 92), 'stop'),    # 8 % (al_margin_k_B500_r3_rows fell 7.7 %)
-    ('r4', (313, 281), 'go'),            # round 4 from r3_real: 10.2 %
+    ('pilot', (100, 80), 'stop'),
+    ('r3_strong', (100, 85), 'go'),
+    ('r3_strong', (100, 92), 'stop'),
+    ('r4', (313, 281), 'go'),
 ])
 def test_pair_drop_by_kind_of_run(kind, pairs, decision):
     assert um.verdict(um.GATES[kind], 0.5582, 0.60, comparison(pairs=pairs), 0.96, 0.96)[0] == decision
 
 
 @pytest.mark.parametrize('largest, decision', [
-    ((99, 108), 'stop'),   # al_margin_k_B500_r3_train: 162<->186 rose 9 %
-    ((99, 104), 'stop'),   # 104 > 99 * 1.05 = 103.95
+    ((99, 108), 'stop'),
+    ((99, 104), 'stop'),
     ((99, 103), 'go'),
-    ((99, 100), 'go'),     # al_margin_k_B500_r3_rows: one object more is noise
-    ((99, 92), 'go'),      # al_margin_k_B500_r3_real
+    ((99, 100), 'go'),
+    ((99, 92), 'go'),
 ])
 def test_largest_pair_may_not_rise_more_than_5_percent(largest, decision):
     """13/11/2026: r3_train cut its pair confusions 9.7 % but made the largest pair (162<->186 milk) worse."""
@@ -137,10 +136,10 @@ def test_improve_dry_run_runs_every_stage_once(tmp_path):
     assert cli[cli.index('--pseudo') + 1] == 'none' and '--train_rows' in cli
     trained = torch.load(run / 'task_5/task_final.pth', map_location='cpu')['model']['class_embed.0.weight']
     frozen = [r for r in range(6) if r not in pilot['rows']]
-    assert torch.equal(trained[frozen], seed5[frozen])               # rows outside train_rows, bit for bit
+    assert torch.equal(trained[frozen], seed5[frozen])
     assert not torch.equal(trained[pilot['rows']], seed5[pilot['rows']])
     assert pilot['gate']['decision'] in {'go', 'stop'} and pilot['gate']['enforced'] is False
-    assert load_predictions(run / 'task_5/pred_val.npz').image_id.size  # predictions on all of val
+    assert load_predictions(run / 'task_5/pred_val.npz').image_id.size
     assert (Path(plan['root']) / 'scored/pilot/sku_regression.json').is_file()
 
     mtime = (run / 'task_5/task_final.pth').stat().st_mtime
@@ -149,7 +148,7 @@ def test_improve_dry_run_runs_every_stage_once(tmp_path):
     e1 = um.stage_train(plan, 'e1')
     round2 = um.stage_round2(plan)
     assert round2['reference'] == 'e1' and e1['stage'] == 'e1'
-    if e1['gate']['decision'] == 'go':  # e2 only after an e1 stop
+    if e1['gate']['decision'] == 'go':
         with pytest.raises(RuntimeError, match='e2'):
             um.stage_train(plan, 'e2')
     if any(r['gate']['decision'] == 'go' for r in (e1, round2)):
@@ -160,7 +159,6 @@ def test_improve_dry_run_runs_every_stage_once(tmp_path):
     assert um.prepare(settings) == plan
 
 
-# --- vòng 3 (docs/design/2026-11-07-vong-3, Task 5) ---------------------------------------------------------------
 @pytest.mark.parametrize('name, kind', [
     ('al_margin_k_B500', 'pilot'), ('al_margin_k_B500_r2', 'round2'),
     ('al_margin_k_B500_r3_rows', 'r3_base'), ('al_margin_k_B500_r3_train', 'r3_strong'),
@@ -177,7 +175,7 @@ def test_round3_recipes():
     assert (strong['epochs'], strong['lr'], strong['lr_old'], strong['augment']) == (6, 2e-5, 5e-6, 1)
     assert um.VARIANTS['r3_prompt'] == {**strong, 'tune_old_private': 1}
     assert um.VARIANTS['r3_freeze'] == {**strong, 'lr_old': 0.0}
-    for old in ('pilot', 'e1', 'e2', 'round2'):  # công thức cũ không có cờ mới: chạy lại ra đúng như cũ
+    for old in ('pilot', 'e1', 'e2', 'round2'):
         assert 'augment' not in um.VARIANTS[old] and 'tune_old_private' not in um.VARIANTS[old]
 
 
@@ -211,13 +209,12 @@ def test_exp_fb_ft_round3_flags(tmp_path):
         return {flag: out[i + 1] for i, flag in enumerate(out[:-1]) if flag.startswith('--')}
 
     old = last(base)
-    assert old['--augment'] == '0' and old['--tune_old_private'] == '0'  # mặc định: như trước
+    assert old['--augment'] == '0' and old['--tune_old_private'] == '0'
     new = last({**base, 'AUGMENT': '1', 'TUNE_OLD_PRIVATE': '1', 'LR_OLD': '0'})
     assert (new['--augment'], new['--tune_old_private'], new['--lr_old']) == ('1', '1', '0')
-    assert new.get('--augment_flip', '0') == '0'  # không lật ảnh: chữ trên bao bì bị ngược
+    assert new.get('--augment_flip', '0') == '0'
 
 
-# --- vòng 3 (docs/design/2026-11-07-vong-3, Task 7) ---------------------------------------------------------------
 def test_fit_only_for_runs_with_an_al_selection(tmp_path, monkeypatch):
     import tools.fit_check as fc
 
@@ -255,12 +252,11 @@ def test_the_gate_of_an_improve_run_is_a_label_and_never_stops(tmp_path, capsys)
     gate = um._criteria('improve x', 'stop', 'cAcc fell', pair_drop=0.25)
     assert gate['enforced'] is False and gate['decision'] == 'stop' and gate['pair_drop'] == 0.25
     assert 'not enforced' in capsys.readouterr().out
-    result = um._finish(plan, 'x', {'stage': 'x'}, gate)  # would raise GateStop for an enforced stop
+    result = um._finish(plan, 'x', {'stage': 'x'}, gate)
     assert result['gate']['decision'] == 'stop'
     assert json.loads((tmp_path / 'stages/x.json').read_text())['gate']['enforced'] is False
 
 
-# --- đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): vòng 4 và lặp seed ---------------------------------
 def test_round4_kind_recipe_and_gate():
     """al_<selection>_r4: công thức r3_strong, gate như pilot với pair_drop 0,10 (chỉ là nhãn)."""
     assert um._kind('al_margin_k_B500_r4') == 'r4'
@@ -308,7 +304,7 @@ def test_exp_fb_ft_seed_flag_defaults_to_the_old_seed(tmp_path):
                              check=True).stdout.split('\0')[:-1]
         return [out[i + 1] for i, flag in enumerate(out[:-1]) if flag == '--seed']
 
-    assert seeds(base)[-1] == '0'  # như common.sh: mọi run cũ dùng seed 0
+    assert seeds(base)[-1] == '0'
     assert seeds({**base, 'SEED': '1'})[-1] == '1'
 
 
@@ -317,7 +313,6 @@ def test_train_environment_carries_the_seed_of_the_recipe():
     assert um._train_seed(um.VARIANTS['r3_strong_s1']) == 1
 
 
-# --- đợt GPU 1 (docs/design/2026-11-12-dot-gpu-1): B0 test2019 trên campaign tải từ Drive ---------------------------
 def _drive_campaign(tmp_path):
     """Campaign như install_r4.sh kéo về: inputs/<run>/ không có test_full.json (symlink, rclone không upload)."""
     eval_root = tmp_path / 'eval'
@@ -337,13 +332,13 @@ def test_link_test_full_restores_the_link_rclone_did_not_upload(tmp_path):
     link = um._link_test_full(plan, 'al_margin_k_B500_r3_real')
     assert link == Path(plan['root']) / 'inputs/al_margin_k_B500_r3_real/test_full.json'
     assert link.is_symlink() and link.resolve() == (Path(plan['eval_root']) / 'test_full.json').resolve()
-    assert um._link_test_full(plan, 'al_margin_k_B500_r3_real') == link  # chạy lại: giữ nguyên
+    assert um._link_test_full(plan, 'al_margin_k_B500_r3_real') == link
 
 
 def test_link_test_full_replaces_a_broken_link(tmp_path):
     plan = _drive_campaign(tmp_path)
     link = Path(plan['root']) / 'inputs/al_margin_k_B500_r3_real/test_full.json'
-    link.symlink_to(tmp_path / 'old_machine/eval/test_full.json')  # campaign chép từ máy khác
+    link.symlink_to(tmp_path / 'old_machine/eval/test_full.json')
     um._link_test_full(plan, 'al_margin_k_B500_r3_real')
     assert link.resolve() == (Path(plan['eval_root']) / 'test_full.json').resolve()
 

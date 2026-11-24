@@ -65,7 +65,6 @@ INPUT_SIZE = 224
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
-# --- cached arrays ------------------------------------------------------------------------
 
 
 def save_arrays(path: Path, meta: dict[str, Any], arrays: dict[str, np.ndarray]) -> None:
@@ -102,7 +101,6 @@ def cached(path: Path, meta: dict[str, Any], compute: Callable[[], dict[str, np.
     return arrays
 
 
-# --- crops and embeddings ------------------------------------------------------------------
 
 
 def crop_box(box: Sequence[float], margin: float, width: int, height: int) -> tuple[int, int, int, int]:
@@ -179,7 +177,6 @@ def load_backbone(name: str, device: torch.device) -> torch.nn.Module:
     return AutoModel.from_pretrained(name).to(device).eval()
 
 
-# --- detections and memory -----------------------------------------------------------------
 
 
 def load_detector(path: Path, split: str) -> Predictions:
@@ -250,7 +247,6 @@ def build_memory(model: torch.nn.Module, train_path: Path, labels: Sequence[int]
     }
 
 
-# --- classification ------------------------------------------------------------------------
 
 
 def class_confidence(query: torch.Tensor, memory: torch.Tensor, memory_labels: torch.Tensor, num_classes: int,
@@ -348,7 +344,6 @@ def predict_task(cfg: TaskConfig, task_id: int, split: str, det_path: Path, emb_
     return preds
 
 
-# --- CLI -----------------------------------------------------------------------------------
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

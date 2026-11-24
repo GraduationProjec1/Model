@@ -1,21 +1,12 @@
 #!/usr/bin/env bash
-# Đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): bổ sung vào máy đã chạy gpu_bundle_r3/install.sh những thứ
-# đợt này cần thêm, lấy thẳng từ Drive bằng rclone (không có zip riêng):
-#   1. code nhánh feat/dot-gpu-1 (install.sh của gói r3 đã ghi đè code về commit 1d40e74);
-#   2. weights, pred, stage, scored, inputs của al_margin_k_B500_r3_real và _r3_all (đợt al_r3 09/11);
-#   3. weights_md5.txt của đợt al_r3 (case al_r4 của vast_train_and_sync.sh kiểm md5 trước khi train);
-#   4. tập chọn vòng 4 margin_k_B500_r3.json (chọn trên Mac 12/11, kiểm rò rỉ 0);
-#   5. kiểm ảnh test2019 (B0) có đủ trong bộ dữ liệu.
-# Chạy trên máy GPU, sau gpu_bundle_r3/install.sh:  bash /workspace/AutoCheckout-CL/scripts/install_r4.sh
-# Chạy lại được: rclone chỉ tải file thiếu/khác.
 set -euo pipefail
 REPO=${REPO:-/workspace/AutoCheckout-CL}
 DATA=${AC_DATA:-/workspace/autocheckout-data}
 BRANCH=${BRANCH:-feat/dot-gpu-1}
 SRC=${SRC:-gdrive:AutoCheckout/ket_qua_gpu/al_r3_20261109_021108}
 SEL_SRC=${SEL_SRC:-gdrive:AutoCheckout/gpu_bundle_r4/selections}
-SEL_MD5=757b1e93c23db2da7a0b48975104e265      # margin_k_B500_r3.json tạo trên Mac 12/11/2026
-PRED_MD5=08fdb71ff7f7630227342b03c5c40f0c     # pred_val.npz của r3_real mà tập chọn dựa vào
+SEL_MD5=757b1e93c23db2da7a0b48975104e265
+PRED_MD5=08fdb71ff7f7630227342b03c5c40f0c
 CAMP=$REPO/data/training/update-model/relearn-fix-v2
 RUNS=("al_margin_k_B500_r3_real" "al_margin_k_B500_r3_all")
 
@@ -28,8 +19,6 @@ command -v rclone >/dev/null || fail "thiếu rclone"
 
 echo "== 1. Code nhánh $BRANCH"
 git -C "$REPO" fetch -q origin "$BRANCH"
-# install.sh của gói r3 giải nén tar code 1d40e74 đè lên bản clone (không có .git trong tar): file theo dõi bị sửa,
-# nên phải reset --hard về nhánh mới; data/ (gitignore) và file lạ không bị đụng.
 git -C "$REPO" checkout -q -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
 git -C "$REPO" reset -q --hard "origin/$BRANCH"
 echo "   HEAD: $(git -C "$REPO" rev-parse --short HEAD)  $(git -C "$REPO" log -1 --format=%s)"

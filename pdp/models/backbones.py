@@ -15,8 +15,6 @@ def build_feature_backbone(config, create_model):
         kwargs['pretrained_cfg_overlay'] = {'file': str(local_weights), 'hf_hub_id': None, 'url': ''}
     backbone = create_model(config.backbone, pretrained=config.use_pretrained_backbone,
         features_only=True, in_chans=config.num_channels, **kwargs)
-    # Transformers 4.37 post_init recursively initializes Conv/Linear layers.
-    # A backbone already loaded by timm must retain its pretrained tensors.
     if config.use_pretrained_backbone:
         for module in backbone.modules():
             module._is_hf_initialized = True

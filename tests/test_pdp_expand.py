@@ -14,7 +14,7 @@ from tools.make_relearn_config import relearn_config
 
 pytestmark = pytest.mark.slow
 
-LEARNED = 5  # classes of tasks 1-2 of config A
+LEARNED = 5
 
 
 @pytest.fixture(scope="module")
@@ -25,8 +25,8 @@ def toy(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("expand")
     (tmp / "a").mkdir()
     (tmp / "b").mkdir()
-    cfg_a = TaskConfig.from_dict(task_config_dict(sizes=(3, 2), reserved=1))         # n_classes 7
-    cfg_b = relearn_config(cfg_a, [[0, 3], [1]], reserved=1, name="toy+relearn")  # tasks 3, 2, 2, 1, 1 -> 10
+    cfg_a = TaskConfig.from_dict(task_config_dict(sizes=(3, 2), reserved=1))
+    cfg_b = relearn_config(cfg_a, [[0, 3], [1]], reserved=1, name="toy+relearn")
     args_a, args_b = pdp_args(tmp / "a", config=cfg_a), pdp_args(tmp / "b", config=cfg_b)
     trainer_a = make_trainer(args_a, task_id=2)
     trainer_a.model.model.prompts.init_task_prompts()
@@ -54,17 +54,17 @@ def test_learned_rows_are_copied_and_new_rows_start_untrained(toy):
     old, new = toy.old["model"], toy.new["model"]
     w_old, w_new = old["class_embed.0.weight"], new["class_embed.0.weight"]
     assert w_new.shape[0] == 10 and torch.equal(w_new[:5], w_old[:5]) and torch.equal(w_new[-1], w_old[-1])
-    assert 0.01 < w_new[5:9].std() < 0.03  # N(0, init_std = 0.02)
+    assert 0.01 < w_new[5:9].std() < 0.03
     b_new = new["class_embed.0.bias"]
     assert torch.equal(b_new[:5], old["class_embed.0.bias"][:5]) and torch.equal(b_new[-1], old["class_embed.0.bias"][-1])
     assert torch.allclose(b_new[5:9], torch.full((4,), -math.log(99)))
     heads = sorted({k.split(".")[1] for k in new if k.startswith("class_embed.")})
-    assert len(heads) == 2  # one per decoder layer of the tiny model
+    assert len(heads) == 2
     assert all(torch.equal(new[f"class_embed.{i}.weight"], w_new) for i in heads)
     assert all(torch.equal(new[f"class_embed.{i}.bias"], b_new) for i in heads)
 
     p_old, p = old["model.prompts.private_k_0"], new["model.prompts.private_k_0"]
-    assert p_old[:5].norm(dim=1).min() > 0.99  # tasks 1-2 prompts are set in the old checkpoint
+    assert p_old[:5].norm(dim=1).min() > 0.99
     assert p.shape[0] == toy.cfg_b.num_slots and torch.equal(p[:5], p_old[:5]) and p[5:].abs().sum() == 0
 
     assert len(toy.new["class_prototypes"]) == toy.cfg_b.num_slots and toy.new["class_query_cache"][8] == []
@@ -75,7 +75,7 @@ def test_learned_rows_are_copied_and_new_rows_start_untrained(toy):
     runtime.validate_runtime(toy.args_b, toy.new["runtime"])
     with pytest.raises(ValueError):
         runtime.validate_runtime(toy.args_a, toy.new["runtime"])
-    assert len(toy.old["runtime"]["model_config"]["id2label"]) == 7  # the input is not changed
+    assert len(toy.old["runtime"]["model_config"]["id2label"]) == 7
 
 
 def test_expanded_model_predicts_the_learned_classes_exactly_as_before(toy):
@@ -90,7 +90,6 @@ def test_expanded_model_predicts_the_learned_classes_exactly_as_before(toy):
             outputs.append(two_pass(model, batch))
     a, b = outputs
     assert torch.equal(b.last_hidden_state, a.last_hidden_state) and torch.equal(b.pred_boxes, a.pred_boxes)
-    # same rows, but a linear layer of 10 outputs is not computed bit for bit like one of 7 (BLAS kernels)
     torch.testing.assert_close(b.logits[..., :5], a.logits[..., :5], rtol=0, atol=1e-5)
     torch.testing.assert_close(b.logits[..., -1], a.logits[..., -1], rtol=0, atol=1e-5)
 
@@ -110,7 +109,7 @@ def test_task_after_expansion_trains_on_alias_labels(toy):
 
 def test_unexpanded_checkpoint_does_not_load_into_the_larger_model(toy):
     trainer = make_trainer(toy.args_b, task_id=3)
-    with pytest.raises(ValueError, match="n_classes"):  # runtime check, before load_state_dict
+    with pytest.raises(ValueError, match="n_classes"):
         trainer.resume(toy.path_a)
 
 
@@ -118,9 +117,9 @@ def test_unexpanded_checkpoint_does_not_load_into_the_larger_model(toy):
                                                ("changed_learned_class", "differs")])
 def test_expansion_refuses_a_checkpoint_or_config_that_does_not_match(toy, break_it, message):
     old, cfg_a, cfg_b = dict(toy.old), toy.cfg_a, toy.cfg_b
-    if break_it == "rows":  # the checkpoint was not trained with this config
+    if break_it == "rows":
         cfg_a = TaskConfig.from_dict(task_config_dict(sizes=(3, 2), reserved=2))
-    elif break_it == "trained_later_slot":  # the slot after the learned ones has a prompt
+    elif break_it == "trained_later_slot":
         old["model"] = dict(old["model"])
         old["model"]["model.prompts.private_k_0"] = old["model"]["model.prompts.private_k_0"].clone()
         old["model"]["model.prompts.private_k_0"][5] = 1.0
@@ -132,7 +131,6 @@ def test_expansion_refuses_a_checkpoint_or_config_that_does_not_match(toy, break
         expand_checkpoint(old, cfg_a, cfg_b, learned=LEARNED)
 
 
-# --- repartition: same slots, other task boundaries after the learned classes (chia 12+13 SKU) ---------------------
 @pytest.fixture(scope="module")
 def split(tmp_path_factory):
     """Task 1 of config A (2 + 2 classes, 1 reserved) and its repartition to B (2 + 1 + 1, 1 reserved)."""
@@ -165,7 +163,7 @@ def split(tmp_path_factory):
 def test_repartition_changes_only_the_task_boundaries(split):
     old, new = split.old, split.new
     assert new["runtime"]["model_config"]["task_num_classes"] == [2, 1, 1, 1]
-    assert old["runtime"]["model_config"]["task_num_classes"] == [2, 2, 1]  # the input is not changed
+    assert old["runtime"]["model_config"]["task_num_classes"] == [2, 2, 1]
     assert set(new["model"]) == set(old["model"])
     assert all(torch.equal(new["model"][k], old["model"][k]) for k in old["model"])
     for name in ("class_query_cache", "class_prototypes", "class_cache_count"):
@@ -176,7 +174,7 @@ def test_repartition_changes_only_the_task_boundaries(split):
     with pytest.raises(ValueError, match="task_num_classes"):
         runtime.validate_runtime(split.args_a, new["runtime"])
     with pytest.raises(ValueError, match="task_num_classes"):
-        runtime.validate_runtime(split.args_b, old["runtime"])  # the unrepartitioned checkpoint is refused
+        runtime.validate_runtime(split.args_b, old["runtime"])
 
 
 def test_repartitioned_model_predicts_task_1_exactly_as_before(split):

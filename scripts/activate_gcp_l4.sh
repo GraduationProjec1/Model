@@ -1,4 +1,3 @@
-# Source from any directory: source /path/to/AutoCheckout-CL/scripts/activate_gcp_l4.sh
 _autocheckout_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$_autocheckout_root/.venv/bin/activate"
 export PYTHONNOUSERSITE=1

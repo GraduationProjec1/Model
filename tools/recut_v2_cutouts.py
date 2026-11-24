@@ -79,7 +79,7 @@ def main():
             rgba, q = ex.finalize(crop, off, seg(crop, box), bbox, QC["clip_margin"])
             reason = ("empty_mask" if rgba is None else "fill" if not (QC["min_fill"] <= q["fill"] <= QC["max_fill"])
                       else "iou" if q["iou"] < QC["min_iou"] else None)
-            if rgba is None:  # keep the id: fall back to the whole bbox crop so the catalog stays complete
+            if rgba is None:
                 x0, y0 = int(box[0]), int(box[1])
                 rgba = cv2.cvtColor(crop[y0:y0 + int(box[3]), x0:x0 + int(box[2])], cv2.COLOR_BGR2BGRA)
             if max(rgba.shape[:2]) > QC["max_side"]:

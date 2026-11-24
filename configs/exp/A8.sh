@@ -1,4 +1,3 @@
-# A8 (ablation of E4, 3 tasks): shared parameters frozen after task 1 (I5).
 source "$REPO/configs/exp/common.sh"
 EXP=A8
 N_TASKS=3

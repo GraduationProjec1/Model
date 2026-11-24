@@ -79,7 +79,6 @@ def main():
     )
     parser.add_argument("--offline", action="store_true", help="Reuse cached files only; never contact the Hub")
     args = parser.parse_args()
-    # This dedicated download process may access the public Hub even after an offline modeling notebook.
     os.environ["HF_HUB_OFFLINE"] = "1" if args.offline else "0"
     result = download_pretrained(args.cache_dir.resolve(), revision=args.revision, offline=args.offline)
     save_json(args.manifest, result, indent=2)

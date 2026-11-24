@@ -1,17 +1,4 @@
 # coding=utf-8
-# Copyright 2022 The HuggingFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """Convert Deformable DETR checkpoints."""
 
 
@@ -62,12 +49,9 @@ def rename_key(orig_key):
 
 
 def read_in_q_k_v(state_dict):
-    # transformer decoder self-attention layers
     for i in range(6):
-        # read in weights + bias of input projection layer of self-attention
         in_proj_weight = state_dict.pop(f"decoder.layers.{i}.self_attn.in_proj_weight")
         in_proj_bias = state_dict.pop(f"decoder.layers.{i}.self_attn.in_proj_bias")
-        # next, add query, keys and values (in that order) to the state dict
         state_dict[f"decoder.layers.{i}.self_attn.q_proj.weight"] = in_proj_weight[:256, :]
         state_dict[f"decoder.layers.{i}.self_attn.q_proj.bias"] = in_proj_bias[:256]
         state_dict[f"decoder.layers.{i}.self_attn.k_proj.weight"] = in_proj_weight[256:512, :]
@@ -76,7 +60,6 @@ def read_in_q_k_v(state_dict):
         state_dict[f"decoder.layers.{i}.self_attn.v_proj.bias"] = in_proj_bias[-256:]
 
 
-# We will verify our results on an image of cute cats
 def prepare_img():
     url = "http://images.cocodataset.org/val2017/000000039769.jpg"
     im = Image.open(requests.get(url, stream=True).raw)
@@ -98,57 +81,45 @@ def convert_deformable_detr_checkpoint(
     Copy/paste/tweak model's weights to our Deformable DETR structure.
     """
 
-    # load default config
     config = DeformableDetrConfig()
-    # set config attributes
     if single_scale:
         config.num_feature_levels = 1
     config.dilation = dilation
     config.with_box_refine = with_box_refine
     config.two_stage = two_stage
-    # set labels
     config.num_labels = 91
     repo_id = "huggingface/label-files"
     filename = "coco-detection-id2label.json"
     local_label_file_path = "/data/zyt/MD-DETR-main/deformable-detr/coco-detection-id2label.json"
-    #id2label = json.load(open(cached_download(hf_hub_url(repo_id, filename, repo_type="dataset")), "r"))
     id2label = json.load(open(local_label_file_path, "r"))
     id2label = {int(k): v for k, v in id2label.items()}
     config.id2label = id2label
     config.label2id = {v: k for k, v in id2label.items()}
 
-    # load image processor
     image_processor = DeformableDetrImageProcessor(format="coco_detection")
 
-    # prepare image
     img = prepare_img()
     encoding = image_processor(images=img, return_tensors="pt")
     pixel_values = encoding["pixel_values"]
 
     logger.info("Converting model...")
 
-    # load original state dict
     state_dict = torch.load(checkpoint_path, map_location="cpu")["model"]
-    # rename keys
     for key in state_dict.copy().keys():
         val = state_dict.pop(key)
         state_dict[rename_key(key)] = val
-    # query, key and value matrices need special treatment
     read_in_q_k_v(state_dict)
-    # important: we need to prepend a prefix to each of the base model keys as the head models use different attributes for them
     prefix = "model."
     for key in state_dict.copy().keys():
         if not key.startswith("class_embed") and not key.startswith("bbox_embed"):
             val = state_dict.pop(key)
             state_dict[prefix + key] = val
-    # finally, create HuggingFace model and load state dict
     model = DeformableDetrForObjectDetection(config)
     model.load_state_dict(state_dict)
     model.eval()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
-    # verify our conversion
     outputs = model(pixel_values.to(device))
 
     expected_logits = torch.tensor(
@@ -187,13 +158,11 @@ def convert_deformable_detr_checkpoint(
 
     print("Everything ok!")
 
-    # Save model and image processor
     logger.info(f"Saving PyTorch model and image processor to {pytorch_dump_folder_path}...")
     Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
     model.save_pretrained(pytorch_dump_folder_path)
     image_processor.save_pretrained(pytorch_dump_folder_path)
 
-    # Push to hub
     if push_to_hub:
         model_name = "deformable-detr"
         model_name += "-single-scale" if single_scale else ""

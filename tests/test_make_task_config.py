@@ -7,7 +7,6 @@ from autocheckout.io import save_json
 from autocheckout.taskcfg import TaskConfig
 from tools.make_task_config import allocate, build_task_config, distribution_table, main
 
-# 200 synthetic SKUs in 17 supercategories of uneven size, like RPC.
 GROUP_SIZES = [22, 18, 16, 15, 14, 13, 12, 12, 11, 11, 10, 10, 9, 8, 7, 7, 5]
 SIZES = [100, 25, 25, 25, 25]
 
@@ -23,7 +22,6 @@ def rpc_like_categories():
 
 def test_allocate_small_examples():
     assert allocate({"a": 4, "b": 2}, [3, 3]) == {"a": [2, 2], "b": [1, 1]}
-    # Equal remainders go to the supercategory whose name sorts first.
     assert allocate({"c": 1, "b": 1, "a": 1}, [2, 1]) == {"c": [0, 1], "b": [1, 0], "a": [1, 0]}
     with pytest.raises(ValueError, match="add up"):
         allocate({"a": 3}, [2, 2])
@@ -39,7 +37,7 @@ def test_task_sizes_are_exact_and_supercategories_proportional():
     for task, size in zip(config.data_tasks, SIZES, strict=True):
         counts = Counter(c.supercategory for c in task.classes)
         for group, total in per_group.items():
-            assert abs(counts[group] - total * size / 200) < 1  # floor or ceiling of the exact share
+            assert abs(counts[group] - total * size / 200) < 1
         rpc_ids = [c.rpc_category_id for c in task.classes]
         assert rpc_ids == sorted(rpc_ids)
     reserved = config.tasks[-1]
@@ -68,7 +66,6 @@ def test_cli_writes_a_loadable_config(tmp_path, capsys):
     assert "224 slots" in printed
 
 
-# --- split of tasks >= 2 (docs/design/2026-11-09-chia-12-13-sku) -------------------------------------------------
 def test_split_keeps_task_1_and_reserved_and_splits_every_later_task():
     from tools.make_task_config import split_task_config
 
@@ -76,7 +73,7 @@ def test_split_keeps_task_1_and_reserved_and_splits_every_later_task():
     new = split_task_config(old, [12, 13], seed=0, name="100-8x12-13_seed0")
     assert [t.num_classes for t in new.tasks] == [100, 12, 13, 12, 13, 12, 13, 12, 13, 24]
     assert new.num_slots == old.num_slots and new.num_classes == old.num_classes
-    assert new.tasks[0].classes == old.tasks[0].classes  # labels, names, RPC ids of task 1 unchanged
+    assert new.tasks[0].classes == old.tasks[0].classes
     assert new.tasks[-1].reserved and new.tasks[-1].offset == 200
     for t in range(2, 6):
         halves = {c.rpc_category_id for c in new.task(2 * t - 2).classes} | {
@@ -114,7 +111,7 @@ def test_cli_split_from_writes_the_split_config(tmp_path, capsys):
     assert TaskConfig.load(out) == split_task_config(old, [12, 13], 0, "100-8x12-13_seed0")
     assert "224 slots (24 reserved)" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        main(["--name", "x", "--out", str(out)])  # neither --categories nor --split-from
+        main(["--name", "x", "--out", str(out)])
 
 
 REAL_OLD = Path(__file__).resolve().parents[1] / "configs/tasks_100-4x25_seed0.json"

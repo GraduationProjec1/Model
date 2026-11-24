@@ -47,7 +47,6 @@ def provider(metadata, calls):
     def create(name, **kwargs):
         calls.append(kwargs)
         indices = kwargs.get('out_indices', tuple(range(len(metadata))))
-        # Real timm rejects ResNet's index 4 for four-stage ConvNeXt.
         chosen = [metadata[i] for i in indices]
         info = SimpleNamespace(channels=lambda: [r['num_chs'] for r in chosen],
             get_dicts=lambda: chosen, out_indices=indices)

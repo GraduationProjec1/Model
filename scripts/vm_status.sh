@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Status of the VM and of the runs, from the Mac (read-only: never touches the jobs).
-#
-#   bash scripts/vm_status.sh           # one-off summary
-#   bash scripts/vm_status.sh follow    # live output of the running experiment; Ctrl+C only stops watching
-#
-# The pilot chain writes each experiment's output to /data/runs/<name>.log, not to its tmux window,
-# so `tmux attach` shows an empty screen: follow the log instead.
 set -uo pipefail
 GC=(--zone=us-central1-c --project=project-95a0d104-9d0f-4aa1-ba0)
 status=$(gcloud compute instances describe auto-cl "${GC[@]}" --format="value(status)")

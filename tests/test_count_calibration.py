@@ -30,7 +30,6 @@ def test_calibration_needs_only_val_and_can_choose_nms_on_val(tmp_path):
     test.unlink()
     (run / "task_1/pred_test.npz").unlink()
     preds = load_predictions(run / "task_1/pred_val.npz")
-    # Two different labels refer to the same physical object, with equal scores.
     duplicate = Predictions([1, 1], [0, 1], [0, 1], [0.9, 0.9], [[0, 0, 5, 5]] * 2, meta=preds.meta)
     save_predictions(run / "task_1/pred_val.npz", duplicate)
     policy = eval_count.calibrate_run(run, val, three_task_config(), thresholds=[0.2, 0.5], nms_ious=[0, 0.45])
@@ -186,7 +185,6 @@ def test_real_native_runner_evaluates_a_completed_task_and_keeps_its_policy(tmp_
     assert "done, skipped" in result.stdout
     policy = run / "calibration_count.json"
     before = md5_file(policy)
-    # Runner still reports val mAP, but must not silently recalibrate counting on rerun.
     changed_val = load_predictions(run / "task_1/pred_val.npz")
     changed_val.score[:] = 0.05
     save_predictions(run / "task_1/pred_val.npz", changed_val)

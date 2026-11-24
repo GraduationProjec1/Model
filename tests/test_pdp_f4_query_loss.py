@@ -19,6 +19,6 @@ def test_query_loss_trains_query_tf(tmp_path, monkeypatch, query_loss_grad):
     assert query_loss.requires_grad == bool(query_loss_grad)
 
     if query_loss_grad:
-        query_loss.backward()  # L_Q alone
+        query_loss.backward()
         weight = trainer.model.model.prompts.query_tf[0].weight
         assert weight.grad is not None and weight.grad.abs().sum() > 0

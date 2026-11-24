@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pdp_helpers import make_batch, make_trainer, pdp_args, use_tiny_detr  # noqa: E402
 
-# toy config (3, 2): task 2 has PREV_INTRODUCED_CLS 3, seen 5, n_classes 6 (row 5 = background)
 BATCH = [[3, 4], [4]]
 
 
@@ -69,7 +68,6 @@ def test_a_row_of_a_class_not_seen_yet_is_refused(tmp_path, monkeypatch):
 
 
 def test_frozen_rows_keep_their_values_under_weight_decay(tmp_path, monkeypatch):
-    # lr and weight decay large enough that 1 - lr * wd is not rounded to 1.0 in float32
     trainer = trainer_for(tmp_path, monkeypatch, "--train_rows", rows_file(tmp_path, [1, 3]),
                           "--lr", "0.1", "--weight_decay", "0.1")
     before = [(h.weight.detach().clone(), h.bias.detach().clone()) for h in trainer.model.class_embed]
@@ -82,7 +80,7 @@ def test_frozen_rows_keep_their_values_under_weight_decay(tmp_path, monkeypatch)
         loss.backward()
         trainer.on_after_backward()
         optimizer.step()
-        if step == 0:  # weight decay alone moves the frozen rows: the restore below is needed
+        if step == 0:
             assert not torch.equal(trainer.model.class_embed[0].weight[frozen], before[0][0][frozen])
         trainer.on_train_batch_end(None, None, step)
     for head, (weight, bias) in zip(trainer.model.class_embed, before, strict=True):

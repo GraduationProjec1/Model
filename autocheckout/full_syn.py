@@ -25,8 +25,7 @@ import numpy as np
 from autocheckout.io import load_json, md5_file
 from autocheckout.predictions import load_predictions, save_predictions
 
-N_TASKS = 5  # data tasks of the locked 100+4x25 protocol; a campaign's own count is _n_tasks(plan)
-# Task sizes a real campaign may train: r1's protocol and its 12+13-SKU split (docs/design/2026-11-09-chia-12-13-sku)
+N_TASKS = 5
 PROTOCOLS = ([100, 25, 25, 25, 25], [100, 12, 13, 12, 13, 12, 13, 12, 13])
 
 
@@ -96,23 +95,15 @@ def subset_run(run_dir: Path, ann_path: Path, target: Path, split: str = 'test')
     return target
 
 
-# --- rounds, stages and gates ------------------------------------------------------------------------------------
-# Gates of the plan (section 5) and of synthetic-data-v2-decisions-2026-10-21.md (D16-D19); B2 task 1 = 85.79%.
-FSA_EARLY_CHECK = 0.528                   # D18: val cAcc-M2 of FSA
-TASK1_GREEN, TASK1_RED = 0.728, 0.578     # D17: B2 - 13 / - 28 points
-PSEUDO_PRECISION_MIN = 0.5                # plan 4.1 (user, 25/10): teacher pseudo-labels on task 2 images
-MAX_ROUNDS = 3                            # D19
-UNLEARNED_IOU = 0.5                       # D16: cAcc-M2
+FSA_EARLY_CHECK = 0.528
+TASK1_GREEN, TASK1_RED = 0.728, 0.578
+PSEUDO_PRECISION_MIN = 0.5
+MAX_ROUNDS = 3
+UNLEARNED_IOU = 0.5
 FSA, PDP = 'EXP-FULL-SYN-FSA', 'EXP-FULL-SYN'
-# M5 (full-syn-r1-analysis-2026-10-29.md, section 7): last ConvNeXt stage and encoder trained from task 2 on. Its
-# task-1 prototypes stay those of the frozen task-1 features, so past task 2 PPG would compare the teacher's tuned
-# features with stale prototypes: only task 2 runs until they are rebuilt.
 M5, M5_LAST_TASK = 'EXP-FULL-SYN-M5', 2
-# Lower bound (docs/al/PLAN.md, B2): no private pool, no pseudo-labels, tasks 2-5 from the seed's task 1. It has no
-# teacher pseudo-labels to audit, and is scored on val only (its forgetting is the point, not its test score).
 NAIVE = 'EXP-FULL-SYN-NAIVE'
 SEED_POLICIES = ('calibration_count.json', 'calibration_count_m2.json', 'calibration_count_groups.json')
-# M5 pilot against task 2 of its seed (round 1: val cAcc-M2 73.64% on 5,702 images, standard error 0.6 point)
 PILOT_GAIN, PILOT_OLD_DROP = 0.03, 0.01
 DRY_MODEL_ARGS = ['--backbone', '', '--backbone_pretrained_file', '', '--n_classes', '7', '--accelerator', 'cpu',
                   '--num_prompts', '4', '--prompt_len', '2', '--proto_correct_only', '0', '--shuffle', '0']
@@ -168,8 +159,6 @@ def prepare(settings: dict) -> dict:
     if not 1 <= round_id <= MAX_ROUNDS:
         raise ValueError(f'round must be 1..{MAX_ROUNDS} (D19)')
     physical, effective = int(settings['batch_size']), int(settings['effective_batch'])
-    # FSA trains the whole model, so its activations do not fit at the PDP batch: batch 8 runs out of the 4090's
-    # 24 GB at step 0, batch 4 peaks at 15.8 GiB. FSA keeps the effective batch with gradient accumulation.
     fsa_physical = int(settings.get('fsa_batch_size', physical))
     for batch in (physical, fsa_physical):
         if batch < 1 or effective < batch or effective % batch:
@@ -225,8 +214,6 @@ def prepare(settings: dict) -> dict:
                 pdp_experiment=experiment, seed_root=str(seed) if seed else '',
                 seed=_seed_identity(seed, experiment) if seed else None)
     if settings.get('seed_task_config'):
-        # The seed was trained under another task split (chia 12+13 SKU): stage_seed repartitions its task 1. Only
-        # campaigns that set it get these keys, so the plans of earlier campaigns keep comparing equal.
         if seed is None:
             raise ValueError('seed_task_config needs a seed_campaign')
         seed_cfg = resolve(settings['seed_task_config'])
@@ -315,7 +302,7 @@ def _config(plan: dict, experiment: str, runs: Path, fsa_hf: str = '') -> Path:
         model = ['--repo_name', '', '--model_config', plan['model_config']] if experiment == FSA else \
             ['--model_config', fsa_hf]
         lines.append(f'ARGS+=({shlex.join(DRY_MODEL_ARGS + model)})')
-    if plan.get('n_classes'):  # relearn: the expanded model (after the dry-run model, which sets 7)
+    if plan.get('n_classes'):
         lines.append(f"ARGS+=(--n_classes {plan['n_classes']})")
     config = output / 'resolved_config.sh'
     config.write_text('\n'.join(lines) + '\n')
@@ -365,7 +352,6 @@ def _fsa_hf(plan: dict) -> str:
     return str(Path(plan['runs']) / FSA / 'task_1/hf_model')
 
 
-# --- validation scores -------------------------------------------------------------------------------------------
 def _merge_policy(path: Path, policy: dict) -> dict:
     """Policies are chosen stage by stage; the file through task t holds stages 1..t (test needs all of them)."""
     from autocheckout.io import save_json
@@ -479,7 +465,6 @@ def _require(plan: dict, stage: str) -> dict:
     return result
 
 
-# --- stages --------------------------------------------------------------------------------------------------------
 def _not_seeded(plan: dict, stage: str) -> None:
     if plan['seed_root']:
         raise RuntimeError(f'{stage} comes from the seed campaign here: run stage_seed')
@@ -613,7 +598,7 @@ def stage_task1(plan: dict) -> dict:
     return _finish(plan, 'task1', report, gate)
 
 
-TASK1_LOSSLESS_TOL, TASK1_PRED_TOL = 0.001, 1e-5  # plan 3.2 and R11: repartitioning must not change task 1
+TASK1_LOSSLESS_TOL, TASK1_PRED_TOL = 0.001, 1e-5
 
 
 def stage_task1_predict(plan: dict) -> dict:
@@ -722,7 +707,7 @@ def stage_tasks(plan: dict, last: int | None = None, min_precision: dict[int, fl
 def pilot_verdict(pilot: dict, seed: dict) -> tuple[str, str]:
     """M5 pilot: its task-2 val report against the seed's. cAcc-M2 must rise by PILOT_GAIN (five standard errors) and
     the AP50 of the task-1 classes (mAP_P) fall by at most PILOT_OLD_DROP. Returns (decision, reason)."""
-    gain = round(pilot['cAcc_m2'] - seed['cAcc_m2'], 6)  # 0.7664 - 0.7364 is 0.02999... in floats
+    gain = round(pilot['cAcc_m2'] - seed['cAcc_m2'], 6)
     drop = round(seed['AP50']['mAP_P'] - pilot['AP50']['mAP_P'], 6)
     scores = (f"cAcc-M2 {seed['cAcc_m2']:.4f} -> {pilot['cAcc_m2']:.4f} ({gain:+.4f}), AP50 task-1 classes "
               f"{seed['AP50']['mAP_P']:.4f} -> {pilot['AP50']['mAP_P']:.4f} ({-drop:+.4f})")
@@ -816,7 +801,6 @@ def write_summary(plan: dict) -> Path:
     return path
 
 
-# --- F0.7: smoke and benchmark on the rented GPU ---------------------------------------------------------------------
 def check_data(plan: dict, sample: int = 300) -> dict:
     """The data package on this machine: every image the annotation files list exists, and a random sample of the
     package's SHA256SUMS still matches (hashing all 26 GB takes over an hour)."""
@@ -876,7 +860,7 @@ def stage_smoke(plan: dict, steps: int = 200) -> dict:
                     raise RuntimeError(f'FSA smoke did not stop at step {stop} (exit {code})')
         sessions = load_json(fsa / 'run_info.json')['sessions']
         report['fsa'] = {**_speed(fsa), 'resume_verification': sessions[-1].get('resume_verification')}
-        if not plan['dry_run']:  # the dry run has no detector to start PDP from; stage_task1 covers that path
+        if not plan['dry_run']:
             pdp = runs / PDP / 'task_1'
             if not (pdp / 'progress.json').is_file():
                 _train(plan, record, attempt, PDP, start=1, n=1, epochs=plan['epochs'], splits='val', runs=runs,
@@ -892,7 +876,6 @@ def stage_smoke(plan: dict, steps: int = 200) -> dict:
                              plan.get('fsa_batch_size', plan['batch_size']))}
     if 'pdp' in report:
         seconds = report['pdp']['seconds_per_step']
-        # B2 on the 4090: a task >= 2 image took 1.47x a task 1 image (teacher forward), validation included
         estimate.update(task1=hours(images[0], plan['epochs'], seconds),
                         tasks_2_5=round(sum(hours(n, plan['epochs'], 1.47 * seconds) for n in images[1:]), 2))
     report['training_hours_estimate'] = {**estimate, 'note': 'training steps only; validation every epoch '

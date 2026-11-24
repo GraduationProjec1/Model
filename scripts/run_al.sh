@@ -1,24 +1,6 @@
 #!/usr/bin/env bash
-# Active learning (docs/al/RUNBOOK.md): train each al_<selection> variant from the round-1 model as the pilot, score
-# it on Val-B with thresholds chosen on Val-A-calib (tools/al_score.py), then rebuild the report (tools/al_report.py).
-#
-#   bash scripts/run_al.sh dot1                 # B=500: random x3, margin, margin_k, margin_bal + oracle (~7 run)
-#   bash scripts/run_al.sh dot2                 # B=250, 850 (random x3, margin, margin_k, margin_bal, entropy)
-#   bash scripts/run_al.sh al_margin_k_B500_r2  # vòng 2: tự tạo tập chọn + gói từ model vòng 1, rồi train
-#   bash scripts/run_al.sh al_margin_k_B500_r3_rows al_margin_k_B500_r3_train   # vòng 3 (docs/design/2026-11-07-vong-3):
-#       tag rows|train|real|all|prompt|freeze; gói dựng từ tập chọn margin_k_B500_r2 + base e1; freeze cần
-#       R3_FREEZE_DATA=<tag của run tốt nhất> (dữ liệu của run đó, chỉ đổi lr_old = 0)
-#   bash scripts/run_al.sh al_margin_k_B500_r3_real_s1   # B4: lặp r3_real với seed train 1 (dữ liệu của real)
-#   bash scripts/run_al.sh al_margin_k_B500_r4            # B1: vòng 4 từ model r3_real (docs/design/2026-11-12-dot-gpu-1);
-#       tập chọn margin_k_B500_r3 (al_round2 --from ..._r3_real) dựng sẵn hoặc tự tạo; R4_BUDGET (mặc định 500)
-#   bash scripts/run_al.sh dot1 --dry-run       # chỉ dựng dữ liệu (CPU), không train
-#   bash scripts/run_al.sh test al_margin_k_B500 al_random_B500_s0 --confirm-test   # test2019, MỘT lần mỗi run
-#
-# Bị ngắt thì chạy lại đúng lệnh: run đã có stages/<tên>.json được bỏ qua, điểm đã có (kể cả test2019) cũng bỏ qua.
-# Một run lỗi không chặn các run sau; cuối lệnh in [LỖI] <run> và thoát mã 1 nếu có run lỗi.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-# Thư mục dữ liệu chung (autocheckout/datapaths.py): ../autocheckout-data cạnh repo, hoặc AC_DATA=/duong/dan.
 DATA=$(cd "${AC_DATA:-$REPO/../autocheckout-data}" && pwd)
 REL=$DATA/relearn
 SETTINGS=${SETTINGS:-$REPO/configs/training/update_model_relearn_fix_v2.json}
@@ -63,7 +45,7 @@ if [[ $TEST == 1 ]]; then
     [[ $CONFIRM == 1 ]] || { echo "test2019 chỉ chấm MỘT lần: thêm --confirm-test khi nhóm đã chốt" >&2; exit 2; }
     for v in "${VARIANTS[@]}"; do
         um --stage final_test --variant "$v" --confirm-test || { failed "$v test2019"; continue; }
-        if [[ -f $REL/active/scored_test/$v.json ]]; then  # đã chấm ở lần chạy trước: al_score không chấm lại
+        if [[ -f $REL/active/scored_test/$v.json ]]; then
             echo "$v: test2019 đã chấm ($REL/active/scored_test/$v.json), bỏ qua al_score" | tee -a "$LOG"
             continue
         fi
@@ -75,12 +57,10 @@ if [[ $TEST == 1 ]]; then
     exit 0
 fi
 
-# Vòng 3: tùy chọn al_build_variant theo dữ liệu của tag (mục 11-B của plan). train/prompt dùng lại dữ liệu của
-# rows/real; mỗi run vẫn có gói riêng (update_model tìm variants/<tên run>).
 r3_build() {
     local v=$1 tag=${1##*_r3_} sel=${1#al_}
     sel=${sel%_r3_*}_r2
-    tag=${tag%_s[0-9]*}   # _s<N> (lặp seed, SEED_TAGS của update_model): dữ liệu của tag gốc
+    tag=${tag%_s[0-9]*}
     [[ $tag == freeze ]] && { tag=${R3_FREEZE_DATA:?"_r3_freeze: đặt R3_FREEZE_DATA=rows|train|real|all|prompt"}; }
     [[ -f $REL/active/selections/$sel.json ]] || { echo "$v: thiếu tập chọn $sel (chạy vòng 2 trước)" >&2; return 1; }
     local opts
@@ -90,7 +70,6 @@ r3_build() {
         all) opts=(--rows configs/relearn/rows_all.json --repeat 8 --v2-keep 0.5) ;;
         *) echo "$v: tag vòng 3 lạ: $tag" >&2; return 1 ;;
     esac
-    # v1.5: SKU không có ảnh ghép đủ mặt giữ ảnh v2 khi cắt + bù v2 tới 600 vật (cần synth_v2 trong data)
     python -m tools.al_build_variant --selection "$sel" --base e1 "${opts[@]}" --no-face-v2 600 --name "$v" \
         2>&1 | tee -a "$LOG"
 }
@@ -100,7 +79,6 @@ build() {
     if [[ $v == *_r3_* ]]; then
         r3_build "$v"
     elif [[ $v == *_r4 ]]; then
-        # vòng 4: từ model _r3_real; tập chọn <sel>_r3 có sẵn (chọn trên Mac, --select-only) thì chỉ dựng gói
         python -m tools.al_round2 --campaign "$CAMPAIGN" --from "${v%_r4}_r3_real" --budget "${R4_BUDGET:-500}" \
             2>&1 | tee -a "$LOG"
     elif [[ $v == *_r2 ]]; then
@@ -119,7 +97,6 @@ for v in "${VARIANTS[@]}"; do
         continue
     fi
     echo "=== $(date -u +%FT%TZ) $v" | tee -a "$LOG"
-    # gate chỉ là nhãn (A6): update_model thoát mã khác 0 nghĩa là lỗi thật (crash, thiếu file, OOM)
     um --stage al --variant "$v" || { failed "$v train"; continue; }
     PRED=$CAMPAIGN/runs/EXP-FB-FT-$v/task_5/pred_val.npz
     if [[ -f $CAMPAIGN/stages/$v.json && -f $PRED && ! -f $REL/active/scored/$v.json ]]; then

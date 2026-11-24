@@ -21,7 +21,6 @@ def prompted_outputs(model, pixel_values, pixel_mask, *, use_prompts, local_quer
             raise RuntimeError('P1: reuse_features reuses the encoder output, which is only valid in eval mode')
         if backbone_features is None:
             backbone_features = model.model.extract_features(pixel_values, pixel_mask)
-    # only the arguments the caller used before P1 when reuse is off, so the model is called exactly as before
     shared = {} if backbone_features is None else {'backbone_features': backbone_features}
     first = model(pixel_values=pixel_values, pixel_mask=pixel_mask, train=False,
                   **task_kwargs(first_task_id), **shared)

@@ -26,7 +26,6 @@ from autocheckout.io import load_json, md5_file, save_json
 from autocheckout.rpc import LEVELS, SOURCES, raw_ann_path, raw_image_dir
 
 MISSING = "<missing>"
-# The largest group is flagged as a giant component (chained groups) above this share of images.
 GIANT_GROUP_SHARE = 0.01
 
 
@@ -149,7 +148,7 @@ def file_stats(coco: dict[str, Any], image_dir: Path) -> dict[str, Any]:
     }
 
 
-Row = tuple[str, str, str, Multiset, str]  # (source, file_name, suffix, SKU multiset, level)
+Row = tuple[str, str, str, Multiset, str]
 
 
 def image_rows(cocos: dict[str, dict[str, Any]]) -> tuple[list[Row], list[str]]:

@@ -18,7 +18,6 @@ def test_real_settings_point_at_the_12x_data_and_the_r1_seed(tmp_path):
     assert settings["seed_campaign"] == str(data.root / "models/full-syn-r1")
     assert settings["seed_task_config"] == str(data.root / "eval/task_config.json")
     assert not any(k.startswith("_") for k in settings)
-    # same training settings as r1 (models/full-syn-r1/plan.json), only the campaign differs
     for key, value in dict(round=1, resolution=640, batch_size=8, effective_batch=8, fsa_batch_size=4, num_workers=8,
                            tf32=True, fsa_epochs=8, epochs=16, checkpoint_every_minutes=2, audit_images=1000,
                            pdp_experiment=full_syn.PDP).items():
@@ -47,7 +46,7 @@ def test_mid_gate_compares_125_skus_with_r1_task_2(tmp_path, monkeypatch, mine, 
         gate = run_split.mid_gate(plan, Layout.at(tmp_path / "data"), accept)
         assert gate["accepted_by_flag"] == accept
         calls.clear()
-        assert run_split.mid_gate(plan, Layout.at(tmp_path / "data"), False) == gate  # kept on resume
+        assert run_split.mid_gate(plan, Layout.at(tmp_path / "data"), False) == gate
         assert calls == []
     saved = json.loads((tmp_path / "stages/mid_gate_125.json").read_text())
     assert saved["decision"] == decision and saved["max_drop"] == run_split.MID_DROP
@@ -85,4 +84,4 @@ def test_dry_run_goes_through_the_whole_chain(tmp_path):
     root = tmp_path / "dry_run/split12-dry"
     assert (root / "smoke_split/smoke_report.json").is_file()
     assert json.loads((root / "stages/task1.json").read_text())["gate"]["decision"] == "go"
-    assert run_split.dry_run(str(settings))["tasks"] == [2, 3, 4, 5]  # resumes, trains nothing again
+    assert run_split.dry_run(str(settings))["tasks"] == [2, 3, 4, 5]

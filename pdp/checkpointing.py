@@ -93,7 +93,7 @@ class TrainingProgress(pl.Callback):
                       seconds_per_optimizer_step=round(elapsed / (trainer.global_step-self.initial_step), 3),
                       teacher_forward_calls=getattr(pl_module, 'teacher_forward_calls', 0),
                       ppg_pseudo_labels_total=getattr(pl_module, 'ppg_pseudo_labels_total', 0),
-                      pseudo_cache_hits=getattr(pl_module, 'pseudo_cache_hits', 0),  # P2
+                      pseudo_cache_hits=getattr(pl_module, 'pseudo_cache_hits', 0),
                       peak_allocated_gib=round(torch.cuda.max_memory_allocated()/2**30, 3) if torch.cuda.is_available() else 0,
                       peak_reserved_gib=round(torch.cuda.max_memory_reserved()/2**30, 3) if torch.cuda.is_available() else 0)
         with (self.directory / 'step_metrics.jsonl').open('a') as stream:
@@ -106,7 +106,7 @@ class TrainingProgress(pl.Callback):
                           optimizer_step=trainer.global_step,
                           teacher_forward_calls=getattr(pl_module, 'teacher_forward_calls', 0),
                           ppg_pseudo_labels_total=getattr(pl_module, 'ppg_pseudo_labels_total', 0),
-                          pseudo_cache_hits=getattr(pl_module, 'pseudo_cache_hits', 0),  # P2
+                          pseudo_cache_hits=getattr(pl_module, 'pseudo_cache_hits', 0),
                           missing_prototypes=pl_module.missing_prototypes()))
 
     def on_exception(self, trainer, pl_module, exception):
@@ -169,10 +169,7 @@ class ResumeCheckpoint(pl.Callback):
         self._last_save = time.monotonic()
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        # Saved at the start of the next batch, when Lightning has already counted the previous
-        # batch as completed: a checkpoint written in on_train_batch_end makes the resumed run
-        # repeat that batch.
-        stepped = trainer.global_step != self._global_step  # the previous batch ran an optimizer step
+        stepped = trainer.global_step != self._global_step
         self._global_step = trainer.global_step
         if self.stop_after_steps and trainer.global_step >= self.stop_after_steps:
             self.save(trainer)

@@ -170,7 +170,6 @@ def create_response(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
                 continue
             raise RuntimeError(f"OpenAI API HTTP {error.code}; credentials and error body omitted") from None
         except (urllib.error.URLError, socket.timeout):
-            # Do not automatically retry uncertain transport failures, which can duplicate charges.
             raise RuntimeError("OpenAI API connection failed; response/charge status unknown") from None
     raise RuntimeError("OpenAI API retry limit reached")
 
@@ -231,14 +230,12 @@ def review_case(
         saved = json.loads(path.read_text())
         if saved["fingerprint"] != fingerprint:
             raise ValueError("Cached request fingerprint mismatch")
-        # Reparse the original receipt after a parser fix without issuing another API call.
         saved["review"] = parse_review(saved["response"], case)
         saved["estimated_cost_usd"] = estimate_cost(saved["usage"], model=model)
         write_json(path, saved)
         return {**saved, "cached": True}
     started_at = timestamp()
     response = send(payload)
-    # Save the receipt even when parsing fails; never silently rebill an incomplete response.
     receipt = {"case_key": [case["source_task"], case["annotation_id"]], "fingerprint": fingerprint,
                "prompt_version": PROMPT_VERSION, "model": model, "started_at": started_at,
                "finished_at": timestamp(), "preview": case["preview"], "cutout": case["cutout"],

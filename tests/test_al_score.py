@@ -113,7 +113,7 @@ def test_cli_default_output_is_unchanged_and_new_options_write_where_asked(tmp_p
     assert result["unlearned_iou"] == 0.5 and set(result["thresholds"]) == {"r1_task_1", "r1_task_2"}
     last = al_score.main(["--data", str(data), "--pred", str(tmp_path / "pred_val.npz"), "--name", "t",
                           "--stage", "5", "--eval-dir", str(tmp_path / "split/eval_12x"), "--out", str(out)])
-    assert "unlearned_iou" not in last  # the last task is scored on every image (cAcc, as r1's task 5)
+    assert "unlearned_iou" not in last
     with pytest.raises(ValueError, match="stage"):
         al_score.main(["--data", str(data), "--pred", str(tmp_path / "pred_val.npz"), "--name", "x", "--stage", "6",
                        "--eval-dir", str(tmp_path / "split/eval_12x"), "--out", str(out)])

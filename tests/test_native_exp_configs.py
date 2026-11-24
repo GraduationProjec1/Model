@@ -89,7 +89,7 @@ def test_native_runner_uses_val_only_calibration_then_saved_policy(tmp_path):
 
 def test_native_runner_reuses_an_existing_calibration_policy(tmp_path):
     policy = tmp_path / "locked.json"
-    policy.write_text("{}")  # the CLI validates content; shell only chooses which mode to call
+    policy.write_text("{}")
     result = run(tmp_path, config='source "$REPO/configs/exp/native/EXP-B2.sh"\n',
                  EVALUATE="1", CALIBRATION_POLICY=str(policy))
     assert result.returncode == 0, result.stderr
@@ -121,7 +121,7 @@ def test_full_syn_configs_follow_the_plan_table():
     assert pdp.repo_name == "/fixture/fsa/task_1/hf_model"
     assert pdp.pseudo_dedup_iou == pdp.pseudo_gt_iou == 0.5 and b2.pseudo_dedup_iou == b2.pseudo_gt_iou == 0
     differ = {k for k in vars(b2) if getattr(pdp, k) != getattr(b2, k)}
-    assert differ == {"train_img_dir", "repo_name", "pseudo_dedup_iou", "pseudo_gt_iou"}  # same TASK_DIR/TASK_CFG given
+    assert differ == {"train_img_dir", "repo_name", "pseudo_dedup_iou", "pseudo_gt_iou"}
     assert fsa.use_prompts == fsa.local_query == 0 and fsa.pseudo == "none" and fsa.freeze == ""
     assert fsa.optim_groups == "detr" and fsa.save_hf == 1 and fsa.select_best_epoch == 1
     assert fsa.repo_name == b2.repo_name and fsa.backbone_pretrained_file == b2.backbone_pretrained_file
@@ -152,7 +152,6 @@ def test_full_syn_rl_config_only_sets_the_class_count():
     assert {k for k in vars(pdp) if getattr(rl, k) != getattr(pdp, k)} == {"n_classes"} and rl.n_classes == 275
 
 
-# --- P1/P2 (docs/design/2026-11-22-toi-uu-2-luot, Task 7): the flags come from the environment, off by default ---
 def native_common_args(**env):
     config = REPO_ROOT / "configs/exp/native/common.sh"
     result = subprocess.run(

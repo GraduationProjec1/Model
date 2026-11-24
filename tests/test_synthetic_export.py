@@ -51,13 +51,13 @@ def test_task2_export_labels_only_new_skus_and_maps_once():
 
 
 def test_a_sku_relearned_in_an_earlier_task_appears_under_its_alias():
-    cfg = relearn_config(task_config(), [[0, 3], [1]], reserved=1, name="t+relearn")  # task 4: rpc 10, 21; task 5: rpc 11
+    cfg = relearn_config(task_config(), [[0, 3], [1]], reserved=1, name="t+relearn")
     coco = canonical_coco([record(5, 7, [(11, True), (10, False), (21, False), (20, False), (30, False)])], CATEGORIES)
     files = export_task_annotations(coco, 5, cfg)
     train, full = files["train_task_5.json"], files["train_task_5_gt_full.json"]
     assert [a["category_id"] for a in train["annotations"]] == list(cfg.task(5).labels) == [7]
     assert train["categories"][0]["name"] == "sku11@t5"
-    assert sorted(a["category_id"] for a in full["annotations"]) == [2, 4, 5, 6, 7]  # rpc 10, 21 as task-4 aliases
+    assert sorted(a["category_id"] for a in full["annotations"]) == [2, 4, 5, 6, 7]
 
 
 def test_export_refuses_scenes_of_another_task():
@@ -140,7 +140,7 @@ def build_release(tmp_path, scene_inputs, config, task_id=1):
 @pytest.fixture
 def release(tmp_path, scene_inputs):
     recipes, kwargs = scene_inputs
-    for r in recipes:                                  # two task-1 SKUs, balanced
+    for r in recipes:
         for o in r["objects"]:
             o["rpc_category_id"] = 10 + o["instance_id"] % 2
     kwargs["scales"] = {"10:2": {"k": 1.0}, "11:2": {"k": 1.0}}
@@ -181,7 +181,7 @@ def test_verify_catches_planted_faults(release, fault, gate):
 def test_verify_accepts_a_relearn_release(tmp_path, scene_inputs):
     from autocheckout.synthetic import verify_dataset
     recipes, kwargs = scene_inputs
-    for i, r in enumerate(recipes):  # task 2 relearns rpc 10, rpc 11 is an old SKU; half of the objects new
+    for i, r in enumerate(recipes):
         r["generation_task"] = 2
         for o in r["objects"]:
             o["rpc_category_id"] = 10 if o["instance_id"] <= 1 + i % 2 else 11
@@ -198,7 +198,7 @@ def test_verify_accepts_a_relearn_release(tmp_path, scene_inputs):
 
 def test_verify_checks_the_placement_balance_when_asked(release):
     from autocheckout.synthetic import verify_dataset
-    out, config = release  # six scenes: rpc 11 drawn from x:0 and x:2, rpc 10 from x:1
+    out, config = release
     catalog = [{"cutout_id": "x:0", "rpc_category_id": 11, "camera": 2, "source": "11_camera2-1.jpg"},
                {"cutout_id": "x:2", "rpc_category_id": 11, "camera": 2, "source": "11-back_camera2-1.jpg"},
                {"cutout_id": "x:1", "rpc_category_id": 10, "camera": 2, "source": "10_camera2-1.jpg"}]
@@ -206,7 +206,7 @@ def test_verify_checks_the_placement_balance_when_asked(release):
     report = verify_dataset(out, config, cutouts=catalog, **kwargs)
     assert report["passed"] and report["gates"]["view_balance"], report["failures"]
     catalog.append({"cutout_id": "x:3", "rpc_category_id": 10, "camera": 2, "source": "10-back_camera2-1.jpg"})
-    report = verify_dataset(out, config, cutouts=catalog, **kwargs)  # rpc 10: back placement never used
+    report = verify_dataset(out, config, cutouts=catalog, **kwargs)
     assert not report["passed"] and not report["gates"]["view_balance"]
     assert report["failures"]["view_balance"] == [{"task": 1, "sku": 10, "camera": 2, "counts": {"back": 0, "front": 6}}]
     assert "view_balance" not in verify_dataset(out, config, min_visible=0.7, quota_tolerance=0.6)["gates"]
@@ -262,7 +262,7 @@ def test_a_killed_worker_fails_instead_of_hanging(tmp_path, scene_inputs, monkey
 
     def dying(recipe, *args, **kw):
         if recipe["image_id"] == recipes[2]["image_id"]:
-            os.kill(os.getpid(), signal.SIGKILL)       # what the kernel does when memory runs out
+            os.kill(os.getpid(), signal.SIGKILL)
         return real(recipe, *args, **kw)
     monkeypatch.setattr(compositing, "write_scene", dying)
     with pytest.raises(BrokenProcessPool):

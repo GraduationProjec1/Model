@@ -19,7 +19,7 @@ def saved_model(path, num_labels):
     config.num_labels, config.use_prompts = num_labels, 0
     model = DeformableDetrForObjectDetection(config)
     with torch.no_grad():
-        model.class_embed[0].bias.fill_(0.3)  # a "trained" value
+        model.class_embed[0].bias.fill_(0.3)
     model.save_pretrained(path)
     DeformableDetrImageProcessor().save_pretrained(path)
     return str(path)
@@ -33,19 +33,19 @@ def class_bias(trainer):
 def test_new_classifier_gets_the_prior(tmp_path, monkeypatch, flag):
     use_tiny_detr(monkeypatch)
     trainer = make_trainer(pdp_args(tmp_path, "--prior_init_classifier", str(flag)), task_id=1)
-    expected = PRIOR if flag else 0.0  # without the fix Hugging Face's init leaves 0 (p = 0.5)
+    expected = PRIOR if flag else 0.0
     torch.testing.assert_close(class_bias(trainer), torch.full_like(class_bias(trainer), expected))
 
 
 def test_checkpoint_with_another_class_count_gets_the_prior(tmp_path, monkeypatch):
     use_tiny_detr(monkeypatch)
-    repo = saved_model(tmp_path / "coco_like", num_labels=4)  # differs from the 6 outputs below
+    repo = saved_model(tmp_path / "coco_like", num_labels=4)
     trainer = make_trainer(pdp_args(tmp_path, "--repo_name", repo), task_id=1)
     assert torch.allclose(class_bias(trainer), torch.tensor(PRIOR))
 
 
 def test_classifier_of_the_same_size_is_kept(tmp_path, monkeypatch):
     use_tiny_detr(monkeypatch)
-    repo = saved_model(tmp_path / "fsa_like", num_labels=6)  # sizes (3, 2) -> 5 slots + 1
+    repo = saved_model(tmp_path / "fsa_like", num_labels=6)
     trainer = make_trainer(pdp_args(tmp_path, "--repo_name", repo), task_id=1)
     assert torch.allclose(class_bias(trainer), torch.tensor(0.3))

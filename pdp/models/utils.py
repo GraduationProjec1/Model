@@ -13,7 +13,6 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch import Tensor
 
-# needed due to empty tensor bug in pytorch and torchvision 0.5
 import torchvision
 
 def setup(rank, world_size, port='9987'):
@@ -60,7 +59,6 @@ def print_final(out_dir, start_task=1, n_tasks=4):
 
 def collate_fn(batch, processor):
   pixel_values = [item[0] for item in batch]
-  #print(pixel_values)
   encoding = processor.pad(pixel_values, return_tensors="pt")
   labels = [item[1] for item in batch]
   batch = {}
@@ -170,21 +168,16 @@ def all_gather(data):
 	if world_size == 1:
 		return [data]
 
-	# serialized to a Tensor
 	buffer = pickle.dumps(data)
 	storage = torch.ByteStorage.from_buffer(buffer)
 	tensor = torch.ByteTensor(storage).to("cuda")
 
-	# obtain Tensor size of each rank
 	local_size = torch.tensor([tensor.numel()], device="cuda")
 	size_list = [torch.tensor([0], device="cuda") for _ in range(world_size)]
 	dist.all_gather(size_list, local_size)
 	size_list = [int(size.item()) for size in size_list]
 	max_size = max(size_list)
 
-	# receiving Tensor from all ranks
-	# we pad the tensor because torch all_gather does not support
-	# gathering tensors of different shapes
 	tensor_list = []
 	for _ in size_list:
 		tensor_list.append(torch.empty((max_size,), dtype=torch.uint8, device="cuda"))
@@ -216,7 +209,6 @@ def reduce_dict(input_dict, average=True):
 	with torch.no_grad():
 		names = []
 		values = []
-		# sort the keys so that they are consistent across processes
 		for k in sorted(input_dict.keys()):
 			names.append(k)
 			values.append(input_dict[k])

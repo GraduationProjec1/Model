@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> dict:
                 'annotations': val_b['annotations'] + [a for a in val_a['annotations'] if a['image_id'] in keep]}
     cfg = TaskConfig.load(args.task_config)
     preds = load_predictions(args.pred)
-    if not np.isin(sorted(keep | set(target)), preds.image_id).all():  # scored/<run>/task_5 holds Val-B only
+    if not np.isin(sorted(keep | set(target)), preds.image_id).all():
         raise ValueError(f'{args.pred}: no predictions for every selection and Val-B image (use runs/<run>/task_5)')
     result = {'name': args.name, 'calib_images': len(calib), 'target_images': len(target),
               **run(val_full, cfg, preds, calib, target, max_sku=args.max_sku,

@@ -1,5 +1,3 @@
-# E2 (MD-DETR-like): private pool only, pseudo-labels by a fixed threshold 0.65 on the top-5 queries;
-# on the FSA base like E1, E3, E4.
 source "$REPO/configs/exp/common.sh"
 EXP=E2
 N_TASKS=5

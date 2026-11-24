@@ -68,7 +68,7 @@ def group_keys(file_names: Sequence[str], multisets: Sequence[Multiset]) -> list
     first_by_multiset: dict[Multiset, int] = {}
     for i, (suffix, multiset) in enumerate(zip(suffixes, multisets, strict=True)):
         union(i, first_by_suffix.setdefault(suffix, i))
-        if multiset:  # never merge images just because both are empty
+        if multiset:
             union(i, first_by_multiset.setdefault(multiset, i))
 
     smallest: dict[int, str] = {}

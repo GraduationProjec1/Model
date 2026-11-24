@@ -88,7 +88,7 @@ def test_gt_full_and_full_files_keep_every_object(pipeline):
         assert {img["id"] for img in gt_full["images"]} == ids
         train_anns = splits["train"]["annotations"]
         assert len(gt_full["annotations"]) == sum(a["image_id"] in ids for a in train_anns)
-        assert {a["category_id"] for a in gt_full["annotations"]} - set(task.labels)  # other tasks too
+        assert {a["category_id"] for a in gt_full["annotations"]} - set(task.labels)
     for name in ("val", "test"):
         full = load_json(out / f"{name}_full.json")
         assert len(full["images"]) == len(splits[name]["images"])
@@ -137,7 +137,7 @@ def test_pilot_uses_the_same_tool(pipeline, tmp_path):
     pilot_ids = {img["id"] for img in load_json(pilot)["images"]}
     assert {img["id"] for img in load_json(out / "train_task_1_gt_full.json")["images"]} <= pilot_ids
     with pytest.raises(SystemExit):
-        run(root, tmp_path / "bad", "--tasks", "4")  # the reserved task has no data
+        run(root, tmp_path / "bad", "--tasks", "4")
 
 
 def test_several_train_sources(pipeline, tmp_path):
@@ -166,7 +166,7 @@ def test_files_load_with_pycocotools_and_the_pdp_loader(pipeline):
     for path in out.glob("*.json"):
         if path.name != "manifest.json":
             COCO(str(path))
-    os.environ.setdefault("USE_TF", "0")  # the TensorFlow in the Mac venv aborts on import
+    os.environ.setdefault("USE_TF", "0")
     from datasets.coco_hug import CocoDetection
     from models.image_processing_deformable_detr import DeformableDetrImageProcessor
 
@@ -176,7 +176,7 @@ def test_files_load_with_pycocotools_and_the_pdp_loader(pipeline):
     anns = dataset.coco.imgToAnns[dataset.ids[0]]
     assert pixel_values.shape[0] == 3 and len(anns) > 0
     assert target["class_labels"].tolist() == [a["category_id"] for a in anns]
-    scale = (target["size"][0] / target["orig_size"][0]).item() ** 2  # the processor resizes 40 -> 800 px
+    scale = (target["size"][0] / target["orig_size"][0]).item() ** 2
     assert target["area"].tolist() == pytest.approx([a["area"] * scale for a in anns], rel=1e-4)
 
 
@@ -185,7 +185,7 @@ def test_joint_and_class_agnostic_files(pipeline, tmp_path):
     out = run(root, tmp_path / "tasks", "--joint", "--agnostic-out", str(tmp_path / "agnostic"))
     train = splits["train"]
 
-    joint = load_json(out / "train_joint.json")  # every train image with any data class, every label
+    joint = load_json(out / "train_joint.json")
     assert len(joint["annotations"]) == len(train["annotations"])
     capped = set()
     for task in config.data_tasks:
@@ -199,7 +199,6 @@ def test_joint_and_class_agnostic_files(pipeline, tmp_path):
     for name, ids in (("train_task_1.json", task1), ("train_task_1_capped.json", task1_capped)):
         data = load_json(tmp_path / "agnostic" / name)
         assert {img["id"] for img in data["images"]} == ids
-        # option (b): every box of those images, not only task-1 SKUs, all as class 0
         assert len(data["annotations"]) == sum(a["image_id"] in ids for a in train["annotations"])
         assert {a["category_id"] for a in data["annotations"]} == {0}
     val = load_json(tmp_path / "agnostic" / "val_task_1.json")

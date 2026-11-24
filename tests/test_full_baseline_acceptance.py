@@ -48,7 +48,6 @@ def test_acceptance_checks_real_optimizer_and_lightning_resume(tmp_path, monkeyp
     module.model.model.prompts.set_task_id(0)
     module.model.model.prompts.init_task_prompts()
     module.resume()
-    # A nonempty prototype makes missing PDP state restoration detectable.
     module.update_class_cache(0, torch.ones(256))
     module.class_prototypes[0] = module.compute_class_prototypes(0)
     report = acceptance.exercise_baseline(module, loader, args, tmp_path / "acceptance")

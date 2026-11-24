@@ -1,4 +1,3 @@
-# Native real-only release, matching notebooks 02/03. Legacy experiments live one level above.
 RAW_ROOT=${RAW_ROOT:-${AUTOCHECKOUT_DATA_ROOT:-$REPO/data/archive}}
 RELEASE_ROOT=${RELEASE_ROOT:-${AUTOCHECKOUT_RELEASE_ROOT:-$REPO/data/processed/rpc_100-4x25_seed0_native_v1}}
 TASK_CFG=${TASK_CFG:-$RELEASE_ROOT/task_config.json}
@@ -6,7 +5,6 @@ TASK_DIR=${TASK_DIR:-$RELEASE_ROOT/tasks/real}
 DETECTOR_DIR=${DETECTOR_DIR:-$REPO/runs/pretrained/hf-cache/models--SenseTime--deformable-detr/snapshots/83ecd26945199939cb82806f988debdb71e6f43e}
 RESOLUTION=${RESOLUTION:-640}
 N_TASKS=${N_TASKS:-1}
-# Smoke stays training-only; enable S6 evaluation with EVALUATE=1 for pilot/full runs.
 EVAL_MODE=calibrated
 SKIP_EVAL=1
 if [[ ${EVALUATE:-0} == 1 ]]; then
@@ -29,7 +27,6 @@ ARGS=(
     --freeze_shared_after_task1 0 --pseudo_dedup_iou 0
     --stop_after_steps "${STOP_AFTER_STEPS:-0}" --verify_resume "${VERIFY_RESUME:-0}"
     --ckpt_every_minutes "${CKPT_EVERY_MINUTES:-2}"
-    # P1/P2 (docs/design/2026-11-22-toi-uu-2-luot): speed-ups with the same results; off unless exported
     --reuse_features "${REUSE_FEATURES:-0}" --cache_pseudo "${CACHE_PSEUDO:-0}"
 )
 if [[ -n ${PREV_CKPT:-} ]]; then

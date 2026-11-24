@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> dict:
              'val_a_md5': _md5_ids(ids_a), 'n_pool': len(pool), 'n_calib': len(calib)}
     save_json(out / 'splits/val_a_split.json', split)
 
-    scores = image_scores(preds, pool)  # predictions only: no label is read for the pool
+    scores = image_scores(preds, pool)
     save_json(out / 'scores/r1_pool.json', {'pred': str(pred.relative_to(data.root)), 'pred_md5': md5_file(pred),
                                             'images': scores})
 

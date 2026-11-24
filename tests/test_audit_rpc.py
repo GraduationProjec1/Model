@@ -43,10 +43,10 @@ def test_overlap_and_grouping(audited):
     assert result["overlap"]["shared_file_names"] == 1
     assert result["overlap"]["shared_file_name_examples"] == [planted["shared_file_name"]]
     g = result["grouping"]
-    assert g["suffixes"] == 37  # 33 regular runs + 7001..7004
+    assert g["suffixes"] == 37
     assert g["suffixes_in_both_sources"] == 1 and g["images_with_suffix_in_both_sources"] == 6
-    assert g["suffixes_with_one_multiset"] == 35  # 7001 and 7004 hold two baskets each
-    assert g["multisets_shared_by_several_suffixes"] == 1  # 7002 / 7003
+    assert g["suffixes_with_one_multiset"] == 35
+    assert g["multisets_shared_by_several_suffixes"] == 1
     assert g["groups"] == 36 and g["suffix_groups_merged_by_multiset"] == 1
     assert g["groups_with_several_suffixes"] == 1 and g["images_in_groups_with_several_suffixes"] == 6
     assert g["groups_spanning_levels"] == 1 and g["groups_spanning_sources"] == 1
@@ -58,7 +58,7 @@ def test_md5_duplicates(audited):
     result, _, planted = audited
     assert result["md5"]["duplicate_sets"] == 1
     assert result["md5"]["sets"] == [[f"test2019/{name}" for name in planted["duplicate"]]]
-    assert result["md5"]["sets_spanning_groups"] == 0  # both shots of the same run
+    assert result["md5"]["sets_spanning_groups"] == 0
 
 
 def test_missing_fields_are_counted(audited):

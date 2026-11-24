@@ -1,4 +1,3 @@
-# A7 (ablation of E4, 3 tasks): nearest-prototype check on (I4).
 source "$REPO/configs/exp/common.sh"
 EXP=A7
 N_TASKS=3

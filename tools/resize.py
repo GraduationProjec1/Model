@@ -32,7 +32,6 @@ from tqdm import tqdm
 from autocheckout.io import load_json, save_json
 from autocheckout.rpc import LEVELS, SOURCES, raw_ann_path, raw_image_dir
 
-# Largest allowed |width - height| / max(width, height): RPC has one 1860x1859 image (DL1 audit).
 MAX_ASPECT_GAP = 0.01
 
 def merge_annotations(cocos: dict[str, dict[str, Any]], size: int | None) -> dict[str, Any]:

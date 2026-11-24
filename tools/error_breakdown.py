@@ -88,7 +88,7 @@ def explain_image(gt_labels: np.ndarray, gt_boxes: np.ndarray, labels: np.ndarra
 
 
 def thresholds_of(policy: dict[str, Any], cfg: TaskConfig) -> tuple[np.ndarray, float]:
-    if 'thresholds' in policy:  # tools/al_score.py
+    if 'thresholds' in policy:
         groups = [list(cfg.task(t).labels) for t in range(1, STAGE + 1)]
         vector = [policy['thresholds'][f'task_{t}'] for t in range(1, STAGE + 1)]
         return label_thresholds(groups, vector), float(policy['nms_iou'])

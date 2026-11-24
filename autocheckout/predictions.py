@@ -30,11 +30,11 @@ _ARRAYS = ("image_id", "query", "label", "score", "boxes")
 
 @dataclass
 class Predictions:
-    image_id: np.ndarray  # (N,) int64
-    query: np.ndarray  # (N,) int32, index of the detector query (or box) that produced the row
-    label: np.ndarray  # (N,) int32, model label
-    score: np.ndarray  # (N,) float32
-    boxes: np.ndarray  # (N, 4) float32, xyxy absolute pixels
+    image_id: np.ndarray
+    query: np.ndarray
+    label: np.ndarray
+    score: np.ndarray
+    boxes: np.ndarray
     meta: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -58,7 +58,6 @@ class Predictions:
         """Keep, for every (image, query), only the highest-scoring class."""
         if len(self) == 0:
             return self.subset(np.zeros(0, dtype=bool))
-        # Sort by (image, query, -score); the first row of each (image, query) run is its best class.
         order = np.lexsort((self.label, -self.score, self.query, self.image_id))
         image_id, query = self.image_id[order], self.query[order]
         first = np.ones(len(order), dtype=bool)

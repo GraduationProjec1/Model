@@ -10,10 +10,9 @@ pytestmark = pytest.mark.slow
 
 
 def test_full_size_model_counts(tmp_path, monkeypatch):
-    # default Deformable DETR (ResNet-50, 6+6 layers) without downloading ImageNet weights
     monkeypatch.setattr(engine, "DeformableDetrConfig", lambda: DeformableDetrConfig(use_pretrained_backbone=False))
     args = pdp_args(tmp_path, "--num_prompts", "100", "--prompt_len", "10", sizes=RPC_SIZES, reserved=RPC_RESERVED)
-    trainer = make_trainer(args, task_id=1)  # resume() applies --freeze and logs the summary
+    trainer = make_trainer(args, task_id=1)
 
     total, trainable, groups = trainer.log_trainable_parameters()
     assert round(total / 1e6, 2) == 69.12

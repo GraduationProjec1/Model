@@ -1,10 +1,3 @@
-# ------------------------------------------------------------------------
-# Deformable DETR
-# Copyright (c) 2020 SenseTime. All Rights Reserved.
-# Licensed under the Apache License, Version 2.0 [see LICENSE for details]
-# ------------------------------------------------------------------------
-# Modified from codes in torch.utils.data.distributed
-# ------------------------------------------------------------------------
 
 import os
 import math
@@ -47,18 +40,15 @@ class DistributedSampler(Sampler):
 
     def __iter__(self):
         if self.shuffle:
-            # deterministically shuffle based on epoch
             g = torch.Generator()
             g.manual_seed(self.epoch)
             indices = torch.randperm(len(self.dataset), generator=g).tolist()
         else:
             indices = torch.arange(len(self.dataset)).tolist()
 
-        # add extra samples to make it evenly divisible
         indices += indices[: (self.total_size - len(indices))]
         assert len(indices) == self.total_size
 
-        # subsample
         offset = self.num_samples * self.rank
         indices = indices[offset : offset + self.num_samples]
         assert len(indices) == self.num_samples
@@ -114,7 +104,6 @@ class NodeDistributedSampler(Sampler):
 
     def __iter__(self):
         if self.shuffle:
-            # deterministically shuffle based on epoch
             g = torch.Generator()
             g.manual_seed(self.epoch)
             indices = torch.randperm(len(self.dataset), generator=g).tolist()
@@ -122,11 +111,9 @@ class NodeDistributedSampler(Sampler):
             indices = torch.arange(len(self.dataset)).tolist()
         indices = [i for i in indices if i % self.num_parts == self.local_rank]
 
-        # add extra samples to make it evenly divisible
         indices += indices[:(self.total_size_parts - len(indices))]
         assert len(indices) == self.total_size_parts
 
-        # subsample
         indices = indices[self.rank // self.num_parts:self.total_size_parts:self.num_replicas // self.num_parts]
         assert len(indices) == self.num_samples
 

@@ -188,7 +188,7 @@ def test_view_coverage_flags_a_missing_placement_and_a_wide_cam0_gap():
     assert cov[1]["placements"] == ["back", "front"] and cov[1]["views"] == {"back/c0": 3, "front/c0": 40}
     assert cov[1]["cam0_gap"] == {"back": 38, "front": 1} and not cov[1]["ok"]
     assert cov[2]["ok"] and cov[2]["views"] == {"back/c2": 1, "front/c2": 1} and cov[2]["cam0_gap"] == {}
-    cov = view_coverage(cutouts[:-1], skus, train, [2])  # SKU 2 without its back cutout
+    cov = view_coverage(cutouts[:-1], skus, train, [2])
     assert list(cov) == [2] and cov[2]["views"] == {"back/c2": 0, "front/c2": 1} and not cov[2]["ok"]
 
 

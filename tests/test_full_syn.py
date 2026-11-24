@@ -43,7 +43,7 @@ def test_links_point_to_synthetic_train_and_real_eval_files_without_gt_full(tmp_
     assert (tmp_path / "links/train_task_3.json").resolve() == (release / "tasks/synth_v2/train_task_3.json").resolve()
     assert (tmp_path / "links/val_task_3.json").resolve() == (eval_root / "val_task_3.json").resolve()
     assert hashes["test_full.json"] == sha(eval_root / "test_full.json")
-    assert link_tasks(release, eval_root, tmp_path / "links") == hashes  # idempotent
+    assert link_tasks(release, eval_root, tmp_path / "links") == hashes
 
 
 def test_links_refuse_changed_files_and_foreign_files(tmp_path):
@@ -88,7 +88,6 @@ def test_subset_run_scores_the_old_test_images_with_the_val_policy(tmp_path):
     run = tmp_path / "run"
     (run / "task_1").mkdir(parents=True)
     (run / "task_1/task_final.pth").write_bytes(b"weights")
-    # image 3: wrong SKU
     rows = [(1, 0, 0, 0.9, [0, 0, 10, 10]), (2, 0, 0, 0.9, [0, 0, 10, 10]), (3, 0, 1, 0.9, [0, 0, 10, 10])]
     for split in ("val", "test"):
         meta = {"task_id": 1, "seen_classes": 2, "split": split, "ann_md5": md5_file(tmp_path / f"{split}_full.json")}
@@ -169,7 +168,7 @@ def test_dry_round_runs_every_stage_and_resumes_without_training_again(tmp_path)
     logs = sorted((tmp_path / "dry_run/dry/attempts/fsa").glob("*/*_runner.log"), key=lambda p: p.stat().st_mtime)
     assert "done, skipped" in logs[-1].read_text()
     with pytest.raises(ValueError, match="new campaign_id"):
-        full_syn.prepare({**settings, "audit_images": 8})  # a changed setting needs a new campaign (round)
+        full_syn.prepare({**settings, "audit_images": 8})
 
 
 @pytest.mark.slow
@@ -203,7 +202,7 @@ def test_m5_pilot_reuses_fsa_and_task1_of_its_seed_and_stops_after_task_2(tmp_pa
     report = full_syn.stage_tasks(plan, last=2)
     assert set(report['tasks']) == {2} and report['stage'] == 2
     log = (run / 'task_2/train.log').read_text()
-    assert 'encoder' in log.split('Trainable parameters')[1].split('\n\n')[0]  # tuned at lr_old
+    assert 'encoder' in log.split('Trainable parameters')[1].split('\n\n')[0]
     steps = [json.loads(line) for line in (run / 'task_2/step_metrics.jsonl').read_text().splitlines()]
     assert all('FKD' in step['losses'] for step in steps)
     assert sha(seed_task1) == before
@@ -279,14 +278,14 @@ def test_split_campaign_repartitions_the_seed_task_1_and_trains_the_new_tasks(tm
     assert new['runtime']['model_config']['task_num_classes'] == [2, 1, 1, 1, 1]
     assert all(torch.equal(new['model'][k], old['model'][k]) for k in old['model'])
     assert seeded['repartition']['task_num_classes'] == [2, 1, 1, 1, 1]
-    assert not (run / 'calibration_count_m2.json').exists()  # task 1 is scored again, on the new labels
+    assert not (run / 'calibration_count_m2.json').exists()
     assert not (tmp_path / 'dry_run/split/stages/task1.json').exists()
     with pytest.raises(RuntimeError, match='run stage task1 first'):
         full_syn.stage_tasks(plan)
 
     smoke = full_syn.stage_smoke_split(plan, steps=1)
     assert smoke['task2']['optimizer_steps'] == 2 and smoke['task2']['resume_verification']['state_equal']
-    assert not (run / 'task_2').exists()  # the smoke trains in smoke_split/, not in the campaign
+    assert not (run / 'task_2').exists()
 
     task1 = full_syn.stage_task1_predict(plan)
     assert task1['gate']['decision'] == 'go' and task1['gate']['predictions_equal']

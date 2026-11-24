@@ -39,13 +39,8 @@ def main_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-# --- a small Deformable DETR for fast CPU tests ---------------------------------------------------
-# d_model and num_queries keep the PDP values (query_tf is hard-coded to 300 x 256); the rest shrinks.
 TINY_DETR = dict(use_pretrained_backbone=False, backbone="resnet18", encoder_layers=1, decoder_layers=2,
                  encoder_ffn_dim=64, decoder_ffn_dim=64)
-# 96 px keeps the smallest feature level at 2x2. At 64 px it is 1x1, and with a batch of one image
-# the CPU GroupNorm backward of input_proj fails on the ambiguous memory format of a [1, C, 1, 1]
-# tensor ("Expected memory formats of X and dY are same"); real 800 px inputs never get there.
 IMAGE_SIZE = 96
 
 
@@ -79,7 +74,7 @@ def pdp_args(tmp_path: Path, *extra: str, sizes=(3, 2), reserved=0, config=None)
         "--output_dir", str(tmp_path / "run"), *extra,
     ])
     pdp_main.setup_task_info(args)
-    args.log_file = open(tmp_path / "log.txt", "a")  # noqa: SIM115 - closed with the tmp dir
+    args.log_file = open(tmp_path / "log.txt", "a")  # noqa: SIM115
     return args
 
 
@@ -93,7 +88,7 @@ def make_trainer(args: argparse.Namespace, task_id: int):
                                    local_evaluator=SimpleNamespace(), task_id=task_id)
     if args.use_prompts:
         trainer.model.model.prompts.set_task_id(task_id - 1)
-    trainer.resume()  # only applies --freeze when no path is given
+    trainer.resume()
     return trainer
 
 
@@ -122,7 +117,6 @@ def make_batch(labels_per_image: list[list[int]], seed: int = 0) -> dict:
     }
 
 
-# --- a toy dataset in the layout of docs/formats.md, for end-to-end runs of main() -----------------
 def make_toy_dataset(root: Path, sizes=(3, 2), n_train=8, n_val=4, n_test=4, seed=0) -> dict:
     """Tiny images with coloured boxes and the per-task JSON files main() reads.
 

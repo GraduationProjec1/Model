@@ -29,7 +29,7 @@ import runtime
 from autocheckout.io import save_json
 from autocheckout.model_acceptance import now
 
-PRIOR_PROB = 0.01  # focal-loss prior of the classifier (Deformable DETR / RetinaNet)
+PRIOR_PROB = 0.01
 
 
 def classifier_from_checkpoint(repo_name, num_labels):
@@ -92,7 +92,6 @@ def frozen_row_mask(train_rows, n_classes, seen_classes):
 	return frozen
 
 
-# I5: name components of the parameters shared by every task (besides the frozen backbone/encoder/decoder)
 SHARED_AFTER_TASK1 = ['input_proj', 'query_tf', 'query_position_embeddings', 'reference_points', 'level_embed', 'bbox_embed']
 
 class local_trainer(pl.LightningModule):
@@ -108,18 +107,15 @@ class local_trainer(pl.LightningModule):
 			args.bg_thres_topk = 5  
 
 		detr_config = runtime.model_config(args, DeformableDetrConfig)
-		detr_config.num_labels = args.n_classes #+ 1
+		detr_config.num_labels = args.n_classes
 		detr_config.PREV_INTRODUCED_CLS = args.task_map[task_id][1]
 		detr_config.CUR_INTRODUCED_CLS = args.task_map[task_id][2]
 		seen_classes = detr_config.PREV_INTRODUCED_CLS + detr_config.CUR_INTRODUCED_CLS
-		# F5: frozen copy of the previous task's model; not registered as a submodule (see set_teacher)
 		self.__dict__['teacher'] = None
-		self._old_prototypes = None  # F6: prototype matrix of the earlier classes, built on first use
-		# P2: teacher pseudo-labels by image_id, filled in the first epoch of a task (see pseudo_labels)
+		self._old_prototypes = None
 		self.use_pseudo_cache = pseudo_cache_enabled(args)
 		self.pseudo_cache = {}
 		self.pseudo_cache_hits = 0
-		#### prompt arguments
 		detr_config.use_prompts = args.use_prompts
 		detr_config.n_tasks = args.n_tasks
 		detr_config.num_prompts = args.num_prompts
@@ -128,19 +124,15 @@ class local_trainer(pl.LightningModule):
 		detr_config.task_num_classes = args.task_num_classes
 		detr_config.use_shared_pool = args.use_shared
 		detr_config.use_private_pool = args.use_private
-		detr_config.tune_old_private = bool(getattr(args, 'tune_old_private', 0))  # round 3, off by default
+		detr_config.tune_old_private = bool(getattr(args, 'tune_old_private', 0))
 
-		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
+		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1))
 		self.seen_classes = seen_classes
 
 		self.model, self.loading_report = runtime.build_model(args, detr_config, DeformableDetrForObjectDetection)
 		self.processor = getattr(args, '_processor', None) or runtime.processor(args, DeformableDetrImageProcessor)
 		self.runtime = runtime.runtime_record(args, self.model, self.processor)
 
-		# F13: Hugging Face's weight initialisation (post_init, and the re-initialisation of the classifier
-		# when the class count differs from the checkpoint) zeroes the classifier bias, overriding the
-		# focal-loss prior set in DeformableDetrForObjectDetection.__init__: every class then starts at
-		# p = 0.5 on every query. Restore the prior unless the classifier comes from the checkpoint.
 		if args.prior_init_classifier and not self.loading_report['classifier_loaded']:
 			for head in self.model.class_embed:
 				nn.init.constant_(head.bias, -math.log((1 - PRIOR_PROB) / PRIOR_PROB))
@@ -199,13 +191,13 @@ class local_trainer(pl.LightningModule):
 		if self.args.use_prompts:
 			teacher.model.prompts.set_task_id(self.task_id - 2)
 		self.__dict__['teacher'] = teacher
-		self.pseudo_cache = {}  # P2: pseudo-labels of the previous teacher are stale
+		self.pseudo_cache = {}
 
 	def on_fit_start(self):
 		if self.teacher is not None:
 			self.teacher.to(self.device)
 		self._old_prototypes = None
-		if self.frozen_rows is not None:  # the loaded values of the rows --train_rows keeps (I9)
+		if self.frozen_rows is not None:
 			self._frozen_values = [(h.weight[self.frozen_rows.to(h.weight.device)].detach().clone(),
 									h.bias[self.frozen_rows.to(h.bias.device)].detach().clone())
 								   for h in self.model.class_embed]
@@ -216,7 +208,6 @@ class local_trainer(pl.LightningModule):
 		uses the prompts (F5). --teacher_prompts 0 restores the original single pass without prompts."""
 		self.teacher_forward_calls = getattr(self, 'teacher_forward_calls', 0) + 1
 		self.teacher.eval()
-		# P1: with --reuse_features the second pass reuses the teacher's backbone and encoder (same results)
 		return prompted_outputs(
 			self.teacher, pixel_values, pixel_mask,
 			use_prompts=bool(self.args.use_prompts and self.args.teacher_prompts),
@@ -246,8 +237,8 @@ class local_trainer(pl.LightningModule):
 		device = self.device
 
 		cache_on_device = [tensor.to(device, non_blocking=True) for tensor in cache]
-		cache_tensor = torch.stack(cache_on_device, dim=0)  # shape=[K, d_model]，K≤300
-		prototype = cache_tensor.mean(dim=0)  # shape=[d_model]
+		cache_tensor = torch.stack(cache_on_device, dim=0)
+		prototype = cache_tensor.mean(dim=0)
 		return prototype
 
 	def print_prototype_space_stats(self, prefix=""):
@@ -299,7 +290,6 @@ class local_trainer(pl.LightningModule):
 			
 			
 			if show_vectors and prototype_norm > 1e-8:
-				# 显示原型向量的前10个维度
 				vector_preview = prototype[:10].cpu().numpy() if prototype.is_cuda else prototype[:10].numpy()
 			
 			print("", file=getattr(self.args, 'log_file', None))
@@ -310,13 +300,11 @@ class local_trainer(pl.LightningModule):
 			return 0.0
 		
 		prototype = self.class_prototypes[cls_label]
-		# 检查原型是否为零向量（未初始化或无样本）
 		prototype_norm = torch.norm(prototype)
 		if prototype_norm < 1e-8:
 			return 0.0
 		prototype = prototype.to(feature.device)
 
-		# 计算余弦相似度
 		similarity = F.cosine_similarity(feature, prototype, dim=0)
 		return similarity.item()
    
@@ -387,7 +375,6 @@ class local_trainer(pl.LightningModule):
 
 	def add_pseudo_labels(self, teacher_outputs, labels):
 		"""Append pseudo-labels of earlier classes to each image's targets (PPG, fix F6; see ppg.py)."""
-		# called through the class so a duck-typed trainer (tests/test_pdp_f6_ppg.py) keeps working as before P2
 		pseudo = local_trainer.compute_pseudo_labels(self, teacher_outputs, labels)
 		return local_trainer.attach_pseudo_labels(self, labels, pseudo)
 
@@ -431,7 +418,6 @@ class local_trainer(pl.LightningModule):
 	def store_pseudo_labels(self, labels, pixel_mask, pseudo):
 		if self.use_pseudo_cache and bool(pixel_mask.all()):
 			for target, (boxes, classes) in zip(labels, pseudo, strict=True):
-				# copies: .cpu() of a CPU tensor is the same tensor, which later code could change in place
 				cached = (boxes.detach().cpu().clone(), classes.detach().cpu().clone())
 				self.pseudo_cache[int(target['image_id'])] = cached
 
@@ -441,17 +427,12 @@ class local_trainer(pl.LightningModule):
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
 		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 
-		# P1: the backbone runs once per step for the teacher and both student passes (None: as before)
 		backbone_features = self.shared_backbone_features(pixel_values, pixel_mask)
 		shared = {} if backbone_features is None else {'backbone_features': backbone_features}
 
-		# F5: the teacher is built once, before training, from the weights of the previous task
-		# (see set_teacher); the original loaded a hard-coded checkpoint07.pth at the first step and
-		# silently disabled distillation and pseudo-labelling when that file was missing.
 		old_model_outputs = None
 		if (not self.eval_mode and self.task_id > 1 and self.teacher is not None and
 			hasattr(self.args, 'use_distillation') and self.args.use_distillation):
-			# P2: images of a cached batch skip the teacher
 			pseudo = self.cached_pseudo_labels(labels, pixel_mask)
 			if pseudo is None:
 				old_model_outputs = self.teacher_outputs(pixel_values, pixel_mask, **shared)
@@ -472,7 +453,6 @@ class local_trainer(pl.LightningModule):
 		if self.args.use_prompts:
 			with torch.no_grad():
 
-				# P1: with --reuse_features the query pass computes no loss (thrown away; L_Q has its own matcher)
 				outputs = self.model(
 					pixel_values=pixel_values, pixel_mask=pixel_mask, labels=None if shared else labels,
 					train=False, task_id=self.task_id, **shared)
@@ -482,7 +462,6 @@ class local_trainer(pl.LightningModule):
 				else:
 					query = outputs.last_hidden_state
 					outputs_without_aux = {k: v for k, v in outputs.items() if k != "auxiliary_outputs" and k != "enc_outputs"}
-					# Retrieve the matching between the outputs of the last layer and the targets
 					indices = self.model.matcher(outputs_without_aux, labels)
 					
 					one_hot_proposals = torch.zeros((len(labels),300)).to(self.device)
@@ -494,8 +473,6 @@ class local_trainer(pl.LightningModule):
 					results = self.processor.post_process(outputs, target_sizes=orig_target_sizes, bg_thres_topk=self.args.bg_thres_topk)
 
 			if self.args.local_query:
-				# F4: L_Q is computed outside no_grad so that it trains query_tf; only the forward pass
-				# producing the query is gradient-free. --query_loss_grad 0 restores the original.
 				with torch.set_grad_enabled(torch.is_grad_enabled() and bool(self.args.query_loss_grad)):
 					query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
 					query_loss = F.cross_entropy(query_wt, one_hot_proposals)
@@ -513,18 +490,17 @@ class local_trainer(pl.LightningModule):
 			if self.update_prototypes_last_epoch_only and is_last_epoch:
 				self.batch_counter += 1
 				if self.batch_counter % self.prototype_update_frequency == 0:
-					query_vectors = outputs.last_hidden_state  # shape: [batch_size, num_queries, d_model]
+					query_vectors = outputs.last_hidden_state
 
 					outputs_without_aux = {k: v for k, v in outputs.items() if k not in ["auxiliary_outputs", "enc_outputs"]}
 					indices = self.model.matcher(outputs_without_aux, labels)
-					# F7: the paper builds prototypes from correctly classified objects only
 					pred_classes = outputs.logits[..., :self.seen_classes].argmax(dim=-1)
 
-					prototype_updates = {}  # {cls_label: [query_vectors]}
+					prototype_updates = {}
 					
 					for batch_idx, (pred_indices, target_indices) in enumerate(indices):
 						current_labels = labels[batch_idx]['class_labels']
-						current_query_vectors = query_vectors[batch_idx]  # [num_queries, d_model]
+						current_query_vectors = query_vectors[batch_idx]
 
 						for pred_idx, target_idx in zip(pred_indices, target_indices):
 							if target_idx < len(current_labels):
@@ -532,7 +508,7 @@ class local_trainer(pl.LightningModule):
 								correct = pred_classes[batch_idx, pred_idx].item() == cls_label
 								if (0 <= cls_label < self.total_classes and cls_label >= self.PREV_INTRODUCED_CLS
 										and (correct or not self.args.proto_correct_only)):
-									matched_query = current_query_vectors[pred_idx]  # [d_model]
+									matched_query = current_query_vectors[pred_idx]
 									if cls_label not in prototype_updates:
 										prototype_updates[cls_label] = []
 									prototype_updates[cls_label].append(matched_query)
@@ -550,17 +526,16 @@ class local_trainer(pl.LightningModule):
 
 				self.batch_counter += 1
 				if self.batch_counter % self.prototype_update_frequency == 0:
-					query_vectors = outputs.last_hidden_state  # shape: [batch_size, num_queries, d_model]
+					query_vectors = outputs.last_hidden_state
 
 					outputs_without_aux = {k: v for k, v in outputs.items() if k not in ["auxiliary_outputs", "enc_outputs"]}
 					indices = self.model.matcher(outputs_without_aux, labels)
-					# F7: the paper builds prototypes from correctly classified objects only
 					pred_classes = outputs.logits[..., :self.seen_classes].argmax(dim=-1)
-					prototype_updates = {}  # {cls_label: [query_vectors]}
+					prototype_updates = {}
 
 					for batch_idx, (pred_indices, target_indices) in enumerate(indices):
 						current_labels = labels[batch_idx]['class_labels']
-						current_query_vectors = query_vectors[batch_idx]  # [num_queries, d_model]
+						current_query_vectors = query_vectors[batch_idx]
 
 						for pred_idx, target_idx in zip(pred_indices, target_indices):
 							if target_idx < len(current_labels):
@@ -568,7 +543,7 @@ class local_trainer(pl.LightningModule):
 								correct = pred_classes[batch_idx, pred_idx].item() == cls_label
 								if (0 <= cls_label < self.total_classes and cls_label >= self.PREV_INTRODUCED_CLS
 										and (correct or not self.args.proto_correct_only)):
-									matched_query = current_query_vectors[pred_idx]  # [d_model]
+									matched_query = current_query_vectors[pred_idx]
 									if cls_label not in prototype_updates:
 										prototype_updates[cls_label] = []
 									prototype_updates[cls_label].append(matched_query)
@@ -583,21 +558,17 @@ class local_trainer(pl.LightningModule):
 		loss_dict = outputs.loss_dict
 
 		if (self.training and self.args.use_prompts and getattr(self.args, 'ddl_lambda', 0) > 0
-				and self.args.use_shared and self.args.use_private):  # L_DDL needs both pools
-			# F3: L_DDL was never applied in the original code (disabled flag, and the decoder
-			# discarded the loss returned by the prompt module).
+				and self.args.use_shared and self.args.use_private):
 			ddl_loss = self.model.model.prompts.ddl_loss_all_layers()
 			loss_dict['loss_ddl'] = ddl_loss
 			loss = loss + self.args.ddl_lambda * ddl_loss
 
 		if self.training and old_model_outputs is not None and self.args.feature_kd > 0:
-			# M5: keep the encoder output of the tuned features close to the teacher's (prompts act in the decoder
-			# only, so both encoders see the same input)
 			kd_loss = F.mse_loss(outputs.encoder_last_hidden_state, old_model_outputs.encoder_last_hidden_state)
 			loss_dict['loss_feature_kd'] = kd_loss
 			loss = loss + self.args.feature_kd * kd_loss
 
-		if self.args.use_prompts and self.args.local_query:  # the query loss exists only with prompts
+		if self.args.use_prompts and self.args.local_query:
 			loss_dict['query_loss'] = query_loss
 
 			loss += self.args.lambda_query * query_loss
@@ -606,10 +577,9 @@ class local_trainer(pl.LightningModule):
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
-				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1] #removing background class
+				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1]
 		
-			# TODO: fix  processor.post_process_object_detection()
-			results = self.processor.post_process(outputs, target_sizes=orig_target_sizes) # convert outputs to COCO api
+			results = self.processor.post_process(outputs, target_sizes=orig_target_sizes)
 			res = {target['image_id'].item(): output for target, output in zip(labels, results)}
 			res = self.evaluator.prepare_for_coco_detection(res)
 		
@@ -617,9 +587,8 @@ class local_trainer(pl.LightningModule):
 
 		return loss, loss_dict
 	
-	def training_step(self, batch, batch_idx): # automatic training schedule
+	def training_step(self, batch, batch_idx):
 		loss, loss_dict = self.common_step(batch, batch_idx)
-		# logs metrics for each training_step
 		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
@@ -646,9 +615,8 @@ class local_trainer(pl.LightningModule):
 			print(message, file=self.args.log_file)
 
 	def on_after_backward(self, *args):
-		# freeze gradients for the classifer weights that do not belong to current task
 		for i in range(len(self.model.class_embed)):
-			if self.frozen_rows is not None:  # --train_rows: every row outside the list
+			if self.frozen_rows is not None:
 				mask = self.frozen_rows.to(self.model.class_embed[i].weight.device)
 				self.model.class_embed[i].weight.grad[mask] = 0
 				self.model.class_embed[i].bias.grad[mask] = 0
@@ -659,8 +627,6 @@ class local_trainer(pl.LightningModule):
 
 	@torch.no_grad()
 	def on_train_batch_end(self, outputs, batch, batch_idx):
-		# --train_rows (I9): AdamW weight decay shrinks a row even with a zero gradient, so put the frozen rows
-		# back to the values they had when training started
 		if self._frozen_values is None:
 			return
 		for head, (weight, bias) in zip(self.model.class_embed, self._frozen_values):
@@ -672,11 +638,7 @@ class local_trainer(pl.LightningModule):
 			return False
 		return self.current_epoch == self.args.epochs - 1
 	def on_train_epoch_end(self):
-		# R1: the scheduler is stepped by Lightning (configure_optimizers), so it is saved and restored
-		# with resume checkpoints.
 		
-		# F8: no full checkpoint (0.5 GiB with optimizer state) every epoch any more; the task's
-		# final weights are written once by save_task_final().
 
 		is_last_epoch = self.is_last_epoch()
 		if is_last_epoch:
@@ -698,8 +660,6 @@ class local_trainer(pl.LightningModule):
 			else:
 				self.coco_evaluator  = self.evaluator.coco_evaluator
 
-		# F9: validate the way the model is evaluated (two passes, learned classes only). The original
-		# went through common_step, i.e. ran the teacher and added pseudo-labels to the validation targets.
 		targets = batch['labels']
 		sizes = torch.stack([t['orig_size'] for t in targets]).to(self.device)
 		results = predict_batch(self.model, batch['pixel_values'].to(self.device), batch['pixel_mask'].to(self.device),
@@ -734,8 +694,6 @@ class local_trainer(pl.LightningModule):
 		self.runtime.update(model_config=self.model.config.to_dict(), processor_config=self.processor.to_dict())
 		checkpoint['runtime'] = self.runtime
 		checkpoint['training_contract'] = runtime.training_contract(self.args)
-		# R1: the prototype memory is not a parameter; keep it in resume checkpoints (the teacher is not
-		# saved: it is rebuilt from the previous task's task_final.pth).
 		checkpoint['pdp_state'] = {
 			'class_query_cache': self.class_query_cache,
 			'class_prototypes': self.class_prototypes,
@@ -802,10 +760,7 @@ class local_trainer(pl.LightningModule):
 			
 			freeze = self.args.freeze.split(',')
 			if self.task_id > 1 and self.args.freeze_shared_after_task1:
-				# I5: parameters shared by all tasks and trained at lr_old could drift away from what
-				# earlier tasks rely on; freeze them from task 2 on.
 				freeze += SHARED_AFTER_TASK1
-			# M5: the features stay trainable after task 1, at lr_old (they are not new_params)
 			tune = self.args.tune_after_task1.split(',') if self.task_id > 1 and self.args.tune_after_task1 else []
 			for id, (name, params) in enumerate(self.model.named_parameters()):
 				params.requires_grad = True
@@ -824,7 +779,7 @@ class local_trainer(pl.LightningModule):
 		"""P1: --reuse_features shares backbone features computed without gradient, so the backbone must stay frozen
 		in every task of the run. Checked when task 1 starts, not when a later task opens the backbone (M5).
 		Without prompts or teacher (FSA, NAIVE) there is nothing to share and the flag changes nothing."""
-		if not self.args.reuse_features or self.args.eval or self.args.predict_only:  # nothing trains
+		if not self.args.reuse_features or self.args.eval or self.args.predict_only:
 			return
 		if not (self.args.use_prompts or self.args.pseudo != 'none'):
 			print('P1: --reuse_features has no effect (no prompts, no teacher)', file=self.args.log_file)
@@ -874,9 +829,6 @@ class local_trainer(pl.LightningModule):
 	def configure_optimizers(self):
 		new_params = self.args.new_params.split(',')
 
-		# B1: 'prompt' groups = new params at lr, the rest at lr_old (PDP); 'detr' groups = Deformable DETR
-		# fine-tuning (lr, backbone lr_backbone, sampling_offsets/reference_points lr x0.1). 'auto' keeps the
-		# original rule: prompt groups when a pretrained model is loaded.
 		groups = self.args.optim_groups if self.args.optim_groups != 'auto' else ('prompt' if self.args.repo_name else 'detr')
 		if groups == 'prompt':
 			param_dicts = [
@@ -941,12 +893,10 @@ class Evaluator():
 		self.task_id = task_id
 		self.task_name = task_name
 
-		#if self.args.mask_gradients:
 		prev_intro_cls = PREV_INTRODUCED_CLS
 		curr_intro_cls = CUR_INTRODUCED_CLS
 		seen_classes = prev_intro_cls + curr_intro_cls
-		#self.invalid_cls_logits = list(range(seen_classes, self.args.n_classes-1)) #unknown class indx will not be included in the invalid class range
-		self.invalid_cls_logits = list(range(seen_classes, self.args.n_classes-1)) #unknown class indx will not be included in the invalid class range
+		self.invalid_cls_logits = list(range(seen_classes, self.args.n_classes-1))
 
 	def convert_to_xywh(self, boxes):
 		xmin, ymin, xmax, ymax = boxes.unbind(1)
@@ -1011,9 +961,7 @@ class Evaluator():
 	def plot_results(self, pil_img, ax, scores, labels, boxes):
 		COLORS = [[0.000, 0.447, 0.741], [0.850, 0.325, 0.098], [0.929, 0.694, 0.125],
 		[0.494, 0.184, 0.556], [0.466, 0.674, 0.188], [0.301, 0.745, 0.933]]
-		#plt.figure(figsize=(16,10))
 		ax.imshow(pil_img)
-		#ax = plt.gca()
 		colors = COLORS * 100
 		for score, label, (xmin, ymin, xmax, ymax),c  in zip(scores.tolist(), labels.tolist(), boxes.tolist(), colors):
 			ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
@@ -1036,11 +984,9 @@ class Evaluator():
 			
 			pixel_values = batch["pixel_values"].to(device)
 			pixel_mask = batch["pixel_mask"].to(device)
-			labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]] # these are in DETR format, resized + normalized
+			labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]]
 			orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 		
-			# P1: same two passes as before (task_id on the first pass only); --reuse_features runs the
-			# backbone and encoder once
 			with torch.no_grad():
 				outputs = prompted_outputs(
 					self.model, pixel_values, pixel_mask, use_prompts=bool(self.args.use_prompts),
@@ -1049,11 +995,11 @@ class Evaluator():
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
-				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1] #removing background class
+				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1]
 	
 			
 			results = self.processor.post_process_object_detection(outputs, target_sizes=orig_target_sizes,
-															threshold=0) # convert outputs to COCO api
+															threshold=0)
 			res = {target['image_id'].item(): output for target, output in zip(labels, results)}
 			res = self.prepare_for_coco_detection(res)
 			coco_evaluator.update(res)
@@ -1062,7 +1008,6 @@ class Evaluator():
 		coco_evaluator.accumulate()
 		coco_evaluator.summarize()
 
-		#if not self.local_trainer or self.local_trainer.trainer.global_rank == 0:
 		if self.local_eval:
 			self.print_coco_stats(epoch=args.epochs+1, stats=coco_evaluator.coco_eval[args.iou_types[0]].stats, print_count=1)
 		elif self.local_trainer.trainer.global_rank == 0:
@@ -1070,7 +1015,6 @@ class Evaluator():
 
 		if args.viz:
 			image_ids = self.test_dataset.coco.getImgIds()
-			#print(image_ids[0:4])
 			for id in image_ids[0:self.args.num_imgs_viz]:
 				try:
 					self.vizualize()
@@ -1091,7 +1035,6 @@ class Evaluator():
 
 		fig, ax = plt.subplots(1, 2, figsize=(14,6), dpi=220)
 
-		# plotting GT
 		annotations = test_dataset.coco.imgToAnns[image_id]
 		cats = test_dataset.coco.cats
 		id2label = {k: v['name'] for k,v in cats.items()}
@@ -1107,7 +1050,6 @@ class Evaluator():
 		ax[0].set_title('GT')
 		self.plot_results(image,ax=ax[0],scores=np.array(scores),labels=np.array(labels),boxes=np.array(boxes))
 
-		# plotting model's inference
 		inputs = self.processor(images=image, return_tensors="pt")
 		inputs['pixel_values'] = inputs['pixel_values'].to(device)
 		inputs['pixel_mask'] = inputs['pixel_mask'].to(device)
@@ -1128,9 +1070,8 @@ class Evaluator():
 
 		if self.args.mask_gradients:
 			outputs.logits[:,:, self.invalid_cls_logits] = -10e10
-			outputs.logits = outputs.logits[:,:,:self.args.n_classes-1] #removing background class
+			outputs.logits = outputs.logits[:,:,:self.args.n_classes-1]
 		
-		# let's only keep predictions with score > 0.3	
 		task = 'cur'
 		if len(self.args.task) > 1:
 			task = 'prev'

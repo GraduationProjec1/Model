@@ -15,12 +15,11 @@ from pdp_helpers import make_batch, make_trainer, pdp_args, use_tiny_detr
 
 pytestmark = pytest.mark.slow
 
-# low PPG threshold, so the random toy teacher gives pseudo-labels and the tests compare something
 LOW_THRESHOLD = ("--pseudo_thresh_high", "0.01")
 
 
 def task2_trainer(tmp_path, *extra):
-    torch.manual_seed(0)  # same random weights for every trainer
+    torch.manual_seed(0)
     trainer = make_trainer(pdp_args(tmp_path, *LOW_THRESHOLD, *extra), task_id=2)
     trainer.set_teacher()
     trainer.train()
@@ -43,7 +42,7 @@ def training_labels(trainer, batch):
             seen.append(kwargs["labels"])
         return forward(*args, **kwargs)
 
-    with pytest.MonkeyPatch.context() as patch:  # its own patch: undoing it must not undo the tiny model
+    with pytest.MonkeyPatch.context() as patch:
         patch.setattr(trainer.model, "forward", spy)
         trainer.common_step(batch, 0)
     return seen[-1]
@@ -76,10 +75,10 @@ def test_cached_pseudo_labels_equal_recomputed(tmp_path):
     batch = make_batch([[3], [3, 4]])
     off = task2_trainer(sub(tmp_path, "off"), "--cache_pseudo", "0")
     expected = training_labels(off, batch)
-    assert sum(len(t["class_labels"]) for t in expected) > 3  # pseudo-labels were added
+    assert sum(len(t["class_labels"]) for t in expected) > 3
     on = task2_trainer(sub(tmp_path, "on"), "--cache_pseudo", "auto")
-    first = training_labels(on, batch)  # miss: teacher runs, cache filled
-    second = training_labels(on, batch)  # hit
+    first = training_labels(on, batch)
+    second = training_labels(on, batch)
     assert_same_labels(first, expected)
     assert_same_labels(second, expected)
 
@@ -90,7 +89,7 @@ def test_teacher_not_called_when_batch_cached(tmp_path):
     trainer.common_step(batch, 0)
     trainer.common_step(batch, 1)
     assert trainer.teacher_forward_calls == 1
-    assert trainer.pseudo_cache_hits == 2  # two images served from the cache
+    assert trainer.pseudo_cache_hits == 2
 
 
 def test_padded_batch_never_uses_the_cache(tmp_path):
@@ -132,7 +131,7 @@ def test_pseudo_label_total_unchanged_and_cache_hits_recorded(tmp_path):
     totals = {}
     for mode in ("0", "auto"):
         trainer = task2_trainer(sub(tmp_path, mode), "--cache_pseudo", mode)
-        for step, batch in enumerate(batches * 2):  # two epochs
+        for step, batch in enumerate(batches * 2):
             trainer.common_step(batch, step)
         totals[mode] = (trainer.ppg_pseudo_labels_total, trainer.pseudo_cache_hits, trainer.teacher_forward_calls)
     assert totals["0"][0] == totals["auto"][0] > 0
@@ -167,8 +166,8 @@ def test_cache_not_changed_by_later_edits_of_the_targets(tmp_path):
     batch = unique_batch([[3], [3, 4]], first_id=1)
     trainer.common_step(batch, 0)
     stored = {i: tuple(t.clone() for t in trainer.pseudo_cache[i]) for i in (1, 2)}
-    assert sum(len(classes) for _, classes in stored.values()) > 0  # something was cached
-    for boxes, _ in trainer.pseudo_cache.values():  # an in-place edit of any tensor that might be shared
+    assert sum(len(classes) for _, classes in stored.values()) > 0
+    for boxes, _ in trainer.pseudo_cache.values():
         for target in batch["labels"]:
             assert target["boxes"].data_ptr() != boxes.data_ptr()
     for target in batch["labels"]:
@@ -181,7 +180,7 @@ def test_training_contract_includes_new_flags_only_when_set(tmp_path):
     import runtime
 
     default = runtime.training_contract(pdp_args(sub(tmp_path, "a")))
-    assert "reuse_features" not in default and "cache_pseudo" not in default  # old checkpoints still resume
+    assert "reuse_features" not in default and "cache_pseudo" not in default
     flags = runtime.training_contract(pdp_args(sub(tmp_path, "b"), "--reuse_features", "1", "--cache_pseudo", "auto"))
     assert flags["reuse_features"] == 1 and flags["cache_pseudo"] == "auto"
 

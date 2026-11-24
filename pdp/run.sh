@@ -41,10 +41,3 @@ python main.py \
     --start_task=2 --n_tasks=3 --local_query=1
 fi
 
-# #### Resume from a checkpoint for given task and then train
-# python main.py \
-#     --output_dir ${EXP_DIR} --train_img_dir ${tr_dir} --test_img_dir ${val_dir} --task_ann_dir ${task_ann_dir} \
-#     --n_gpus 8 --batch_size 1 --epochs 26 --lr 1e-4 --lr_old 1e-5 --n_tasks=4 \
-#     --use_prompts $use_prompts --num_prompts $num_prompts --prompt_len $plen --save_epochs=5 --eval_epochs=2 \
-#     --freeze=${freeze} --viz --new_params=${new_params} --n_classes=81 --num_workers=2 \
-#     --start_task=2 --checkpoint_dir ${LD_DIR}'/Task_1' --checkpoint 'checkpoint10.pth' --resume=1

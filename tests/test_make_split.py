@@ -51,7 +51,7 @@ def test_val_and_test_only_hold_test2019_groups(split):
         assert all(sources[img["group"]] == {"test2019"} for img in splits[name]["images"])
     train_groups = {img["group"] for img in splits["train"]["images"]}
     assert {g for g, s in sources.items() if "val2019" in s} <= train_groups
-    assert "g7001" in train_groups  # suffix used in val2019 and test2019
+    assert "g7001" in train_groups
 
 
 def test_sizes_per_level_and_pilot(split):
@@ -126,14 +126,14 @@ def test_unstratified_split_for_groups_that_mix_levels(tmp_path):
     from tools.make_split import draw_pilot, draw_splits
 
     groups = {}
-    for g in range(60):  # 60 groups of 9 images, 3 per level, all from test2019 except the last 5
+    for g in range(60):
         ids = list(range(9 * g, 9 * g + 9))
         groups[f"g{g}"] = {"images": ids, "levels": Counter(easy=3, medium=3, hard=3), "level": "easy",
                            "sources": {"test2019"} if g < 55 else {"val2019"}}
     splits = draw_splits(groups, seed=0, test_per_level=30, val_per_level=9, stratify="none")
     test_images = sum(len(groups[k]["images"]) for k in splits["test"])
     val_images = sum(len(groups[k]["images"]) for k in splits["val"])
-    assert 90 <= test_images < 99 and 27 <= val_images < 36  # target 3 x per level, overshoot < one group
+    assert 90 <= test_images < 99 and 27 <= val_images < 36
     assert not set(splits["test"]) & set(splits["val"])
     assert {f"g{g}" for g in range(55, 60)} <= set(splits["train"])
     pilot = draw_pilot(groups, splits["train"], 20, seed=0, stratify="none")

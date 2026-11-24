@@ -128,7 +128,6 @@ class EvaluatedPairs:
             coco_eval.params.areaRngLbl = coco_eval.params.areaRngLbl[:1]
             coco_eval.evaluate()
         self.coco_eval = coco_eval
-        # evaluate() stores its own (sorted) id lists; index the results by them
         self._cat_pos = {c: i for i, c in enumerate(coco_eval._paramsEval.catIds)}
         self._img_pos = {m: i for i, m in enumerate(coco_eval._paramsEval.imgIds)}
 
@@ -148,7 +147,7 @@ class EvaluatedPairs:
         subset.params = copy.deepcopy(full.params)
         subset.params.catIds, subset.params.imgIds = cat_ids, img_ids
         with _quiet(), warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)  # empty small/medium/large ranges
+            warnings.simplefilter("ignore", RuntimeWarning)
             subset.accumulate()
             subset.summarize()
         stats = subset.stats

@@ -1,17 +1,4 @@
 # coding=utf-8
-# Copyright 2022 SenseTime and The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """ Deformable DETR model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
@@ -24,7 +11,6 @@ logger = logging.get_logger(__name__)
 DEFORMABLE_DETR_PRETRAINED_CONFIG_ARCHIVE_MAP = {
     "SenseTime/deformable-detr": "https://huggingface.co/sensetime/deformable-detr/resolve/main/config.json",
 
-    # See all Deformable DETR models at https://huggingface.co/models?filter=deformable-detr
 }
 
 
@@ -232,7 +218,6 @@ class DeformableDetrConfig(PretrainedConfig):
         self.backbone = backbone
         self.use_pretrained_backbone = use_pretrained_backbone
         self.dilation = dilation
-        # deformable attributes
         self.num_feature_levels = num_feature_levels
         self.encoder_n_points = encoder_n_points
         self.decoder_n_points = decoder_n_points
@@ -241,11 +226,9 @@ class DeformableDetrConfig(PretrainedConfig):
         self.with_box_refine = with_box_refine
         if two_stage is True and with_box_refine is False:
             raise ValueError("If two_stage is True, with_box_refine must be True.")
-        # Hungarian matcher
         self.class_cost = class_cost
         self.bbox_cost = bbox_cost
         self.giou_cost = giou_cost
-        # Loss coefficients
         self.mask_loss_coefficient = mask_loss_coefficient
         self.dice_loss_coefficient = dice_loss_coefficient
         self.bbox_loss_coefficient = bbox_loss_coefficient

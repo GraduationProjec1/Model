@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Download RPC from Kaggle on the VM and unzip only the checkout images (T0.5).
-#
-#   bash ~/AutoCheckout-CL/scripts/download_rpc.sh
-#
-# Credentials, never committed: a Kaggle API token (KGAT_..., new format) in ~/.kaggle/access_token or
-# in $KAGGLE_API_TOKEN; or a legacy ~/.kaggle/kaggle.json. The Kaggle CLI available for Python 3.10
-# (1.7.4.5) does not read new-format tokens, so the download API is called with curl. Interrupted
-# downloads resume. The HuggingFace mirrors are not usable: they lack the original file names and the
-# `level` field (plan section 4.1).
 set -euo pipefail
 DATA=${DATA:-/data/rpc}
 RAW=$DATA/raw
@@ -41,6 +32,6 @@ n_test=$(ls retail_product_checkout/test2019 | wc -l)
 echo "val2019:  $n_val images (expected 6000)"
 echo "test2019: $n_test images (expected 24000)"
 if [[ $n_val -eq 6000 && $n_test -eq 24000 ]]; then
-    rm -f "$ZIP"  # 25.3 GB; download again if the single-product images are needed
+    rm -f "$ZIP"
 fi
 df -h /

@@ -15,10 +15,10 @@ def b(x):
 def test_each_kind_is_named():
     gt_labels = np.array([1, 2, 3, 4, 5])
     gt_boxes = np.array([b(0), b(20), b(40), b(60), b(80)], float)
-    labels = np.array([1, 9, 1, 7, 7])  # right, swap 2->9, duplicate of object 1, half-covering, background
+    labels = np.array([1, 9, 1, 7, 7])
     boxes = np.array([b(0), b(20), [1, 0, 11, 10], b(85), b(200)], float)
-    low = np.array([3]), np.array([b(40)], float)  # object 3: right SKU under its threshold
-    nms = np.array([4]), np.array([b(60)], float)  # object 4: right SKU removed by NMS
+    low = np.array([3]), np.array([b(40)], float)
+    nms = np.array([4]), np.array([b(60)], float)
     errors = explain_image(gt_labels, gt_boxes, labels, boxes, *low, *nms)
     assert sorted(errors) == sorted([('swap', 2, 9), ('miss_threshold', 3, -1), ('miss_nms', 4, -1),
                                      ('miss', 5, -1), ('extra_dup', -1, 1), ('extra_shift', -1, 7),

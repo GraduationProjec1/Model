@@ -67,7 +67,7 @@ def run_case(config, output):
     }
     environment.pop(
         "PYTHONPATH", None
-    )  # runner/entrypoint must establish its own import path
+    )
     command = [
         "bash",
         str(REPO / "scripts/run_exp.sh"),
@@ -128,7 +128,6 @@ def run_case(config, output):
     del saved, frozen
     gc.collect()
 
-    # A new process must reconstruct from checkpoint metadata with unavailable bootstrap paths.
     environment.update(
         STOP_AFTER_STEPS="0",
         DETECTOR_DIR=str(output / "unavailable_detector"),
@@ -193,7 +192,7 @@ def run_case(config, output):
     shutil.copy2(task / "pred_test.npz", output / "pred_test_before_reload.npz")
     (
         task / "pred_test.npz"
-    ).unlink()  # only this newly-created smoke artifact; triggers runner prediction recovery
+    ).unlink()
     run("03_predict_only")
     for split, previous in reference.items():
         current = load_predictions(task / f"pred_{split}.npz")

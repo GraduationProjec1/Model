@@ -31,11 +31,8 @@ from autocheckout.predictions import Predictions, load_predictions
 from autocheckout.taskcfg import TaskConfig
 
 MATCH_IOU = 0.5
-MIN_OBJECTS = 30  # SKUs with fewer GT objects are not judged for a fall
-FALL = 0.02  # fall of the share of objects counted right that is still reported (gate I10, until 12/11/2026)
-# Gate rule since 12/11/2026 (docs/02-cac-lan-train/08-2026-11-12-tong-ket-va-ke-hoach.md, 2.4): an SKU "fell" when its
-# share of right objects dropped by more than FALL_RECALL AND it lost at least FALL_OBJECTS right objects, so that a
-# 3-object wobble on a 150-object SKU no longer stops a run that fixed hundreds of images.
+MIN_OBJECTS = 30
+FALL = 0.02
 FALL_RECALL = 0.03
 FALL_OBJECTS = 5
 
@@ -43,7 +40,7 @@ FALL_OBJECTS = 5
 def fell(sku: dict[str, Any]) -> bool:
     """Gate rule of 12/11/2026 for one ``per_sku`` entry."""
     drop = sku['base'] - sku['new']
-    lost = round(sku['objects'] * drop, 6)  # right objects lost; rounded so 125 * 0.04 counts as 5
+    lost = round(sku['objects'] * drop, 6)
     return sku['objects'] >= MIN_OBJECTS and drop > FALL_RECALL and lost >= FALL_OBJECTS
 
 
@@ -124,7 +121,7 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
     images = sorted(a['correct'])
     fixed = sum(1 for i in images if not a['correct'][i] and b['correct'][i])
     broken = sum(1 for i in images if a['correct'][i] and not b['correct'][i])
-    def over(r: dict, label: int) -> int:  # round 3 v1.5: boxes counted as ``label`` without its object
+    def over(r: dict, label: int) -> int:
         return r['extra'][label] + sum(c for (t, p), c in r['swapped'].items() if p == label and t != label)
 
     per_sku = []
@@ -145,7 +142,6 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
 
     before, after = pairs(a['swapped']), pairs(b['swapped'])
     in_rows = [p for p in set(before) | set(after) if rows and set(p) <= rows]
-    # 13/11/2026: the pair of the gate's "largest pair may not rise" (most base confusions, ties by pair)
     largest = min((p for p in in_rows if before[p]), key=lambda p: (-before[p], p), default=None)
     return {
         'images': len(images),
@@ -160,7 +156,7 @@ def compare(val: dict[str, Any], base: Predictions, new: Predictions, labels: It
             'base': sum(c for (t, p), c in a['swapped'].items() if rows and t not in rows and p in rows),
             'new': sum(c for (t, p), c in b['swapped'].items() if rows and t not in rows and p in rows)},
         'falls': sorted(falls, key=lambda s: s['new'] - s['base']),
-        'falls_2pt': sorted(falls_2pt, key=lambda s: s['new'] - s['base']),  # the rule before 12/11/2026, reported only
+        'falls_2pt': sorted(falls_2pt, key=lambda s: s['new'] - s['base']),
         'per_sku': per_sku,
         'top_pairs': [{'pair': list(p), 'base': before[p], 'new': after[p]}
                       for p, _ in (before + after).most_common(top)],

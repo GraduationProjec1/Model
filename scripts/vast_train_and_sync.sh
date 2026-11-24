@@ -1,42 +1,20 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# Script tự động hoá trên Vast.ai:
-# 1. Ghi lại cấu hình hệ thống, phần cứng, GPU và Git provenance
-# 2. Chạy huấn luyện (Active Learning hoặc Relearn Fix)
-# 3. Ghi lại toàn bộ log, thông số train, metrics
-# 4. Tự động đồng bộ kết quả (checkpoint, logs, stages, report) lên Google Drive bằng rclone
-# 5. Tự động Huỷ (Destroy) hoặc Dừng (Stop) instance Vast.ai để tiết kiệm chi phí
-# ==============================================================================
 set -uo pipefail
 
-# ----------------- CẤU HÌNH MẶC ĐỊNH (CÓ THỂ TRUYỀN TỪ MÔI TRƯỜNG) -----------------
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_DIR"
 
 DATA_DIR="${AC_DATA:-$(cd "$REPO_DIR/../autocheckout-data" 2>/dev/null && pwd || echo "/workspace/autocheckout-data")}"
 export AC_DATA="$DATA_DIR"
 
-# Remote rclone cho Google Drive (tên remote và thư mục trên Drive)
 RCLONE_REMOTE="${RCLONE_REMOTE:-gdrive:AutoCheckout_Runs}"
 
-# Chế độ tự huỷ / tắt máy sau khi đẩy kết quả lên Drive (1 = bật, 0 = tắt)
 AUTO_DESTROY="${AUTO_DESTROY:-1}"
 AUTO_STOP="${AUTO_STOP:-0}"
 
-# API key của Vast.ai để ra lệnh destroy/stop từ bên trong máy
 VAST_API_KEY="${VAST_API_KEY:-}"
 INSTANCE_ID="${INSTANCE_ID:-}"
 
-# Task muốn chạy:
-#   - "al_dot1": Active Learning đợt 1 (7 run B=500: random x3, margin, margin_k, margin_bal, oracle)
-#   - "al_dot2": Active Learning đợt 2 (B=250, 850 + entropy)
-#   - "al_next": vòng 2 từ margin_k (+ random_s0 so sánh) rồi đợt 2; cần khôi phục campaign dot1 từ Drive trước
-#   - "al_r3": vòng 3 (5 run từ model al_margin_k_B500_r2); cần gpu_bundle_r3/install.sh chạy trước (campaign + gói r3)
-#   - "al_r4": đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): B0 test2019 cho r3_real + r3_all, B4 seed
-#              (_r3_real_s1), B1 vòng 4 (_r4), B3 freeze (R4_FREEZE=1); cần campaign có r2, r3_real, r3_all
-#   - "relearn_pilot": Chạy học lại pilot (17 SKU)
-#   - "relearn_e1": Chạy học lại E1 (63 SKU)
-#   - "naive": Chạy fine-tune thẳng (baseline B2)
 TASK="${1:-${TASK:-al_dot1}}"
 
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
@@ -54,7 +32,6 @@ echo " Google Drive Remote: $RCLONE_REMOTE"
 echo " Tự động Destroy: $AUTO_DESTROY (Instance ID: ${INSTANCE_ID:-Chưa xác định})"
 echo "=========================================================="
 
-# ----------------- HÀM DỌN DẸP, SYNC DRIVE VÀ DESTROY INSTANCE -----------------
 finish_and_cleanup() {
     local EXIT_CODE=$?
     if [[ -n "${SYNC_PID:-}" ]]; then pkill -P "$SYNC_PID" 2>/dev/null || true; kill "$SYNC_PID" 2>/dev/null || true; fi
@@ -64,11 +41,9 @@ finish_and_cleanup() {
     echo " BẮT ĐẦU ĐỒNG BỘ KẾT QUẢ VỀ GOOGLE DRIVE..."
     echo "=========================================================="
 
-    # 1. Lưu lại metadata kết thúc
     echo "End Time: $(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_DIR/run_metadata.txt"
     echo "Exit Code: $EXIT_CODE" >> "$LOG_DIR/run_metadata.txt"
 
-    # 1b. Bản dự phòng báo cáo AL (đi cùng update-model) + md5 mọi weights để kiểm tra sau khi tải về
     if [[ -d "$DATA_DIR/relearn/active" ]]; then
         mkdir -p "$REPO_DIR/data/training/update-model/relearn_active_backup"
         cp -r "$DATA_DIR/relearn/active/." "$REPO_DIR/data/training/update-model/relearn_active_backup/" || true
@@ -76,21 +51,18 @@ finish_and_cleanup() {
     (cd "$REPO_DIR/data/training/update-model" 2>/dev/null && find . -name "*.pth" -exec md5sum {} \; | sort -k2) \
         > "$LOG_DIR/weights_md5.txt" 2>/dev/null || true
 
-    # 2. Đồng bộ kết quả qua rclone
     if command -v rclone &>/dev/null; then
         echo "[RCLONE] Đang upload log và stages..."
         rclone copy "$LOG_DIR" "$RCLONE_REMOTE/$RUN_ID/logs" --verbose || true
 
         echo "[RCLONE] Đang upload data/training/update-model..."
         if [[ -d "$REPO_DIR/data/training/update-model" ]]; then
-            # Sync toàn bộ logs, configs, checkpoints, npz và json
             rclone copy "$REPO_DIR/data/training/update-model" "$RCLONE_REMOTE/$RUN_ID/update-model" \
                 --exclude "vast_logs_*" --verbose || true
         fi
 
-        # Chốt an toàn: đếm .pth trên máy và trên Drive; thiếu thì KHÔNG destroy (chỉ stop) để còn lấy lại.
         local N_LOCAL N_REMOTE
-        N_LOCAL=$(find "$REPO_DIR/data/training/update-model" -type f -name "*.pth" 2>/dev/null | wc -l)  # not the symlinks in scored/
+        N_LOCAL=$(find "$REPO_DIR/data/training/update-model" -type f -name "*.pth" 2>/dev/null | wc -l)
         N_REMOTE=$(rclone ls "$RCLONE_REMOTE/$RUN_ID/update-model" --include "*.pth" 2>/dev/null | wc -l)
         echo "[KIỂM TRA] Weights .pth: trên máy $N_LOCAL, trên Drive $N_REMOTE" | tee -a "$LOG_DIR/run_metadata.txt"
         if [[ "$N_REMOTE" -lt "$N_LOCAL" ]]; then
@@ -108,13 +80,11 @@ finish_and_cleanup() {
         echo "[CẢNH BÁO] Rclone chưa được cài hoặc chưa cấu hình! Bỏ qua bước sync."
     fi
 
-    # 3. Tự huỷ hoặc tắt instance Vast.ai
     if [[ "$AUTO_DESTROY" == "1" || "$AUTO_STOP" == "1" ]]; then
         if [[ -n "$VAST_API_KEY" ]]; then
             pip install --quiet --upgrade vastai || true
             vastai set api-key "$VAST_API_KEY" || true
 
-            # Tự dò Instance ID nếu chưa có
             if [[ -z "$INSTANCE_ID" ]]; then
                 INSTANCE_ID=$(vastai show instances --raw 2>/dev/null | python -c "
 import sys, json
@@ -146,7 +116,6 @@ except Exception:
 
 trap finish_and_cleanup EXIT
 
-# ----------------- BƯỚC 1: GHI LẠI TOÀN BỘ CẤU HÌNH HỆ THỐNG VÀ THÔNG SỐ TRAIN -----------------
 {
     echo "=== RUN METADATA & SYSTEM AUDIT ==="
     echo "Run ID: $RUN_ID"
@@ -172,7 +141,6 @@ trap finish_and_cleanup EXIT
     pip list || true
 } > "$LOG_DIR/run_metadata.txt"
 
-# ----------------- BƯỚC 1b: ẢNH CHỤP CẤU HÌNH + ĐỒNG BỘ ĐỊNH KỲ -----------------
 mkdir -p "$LOG_DIR/config_snapshot"
 cp -r configs/training configs/relearn "$LOG_DIR/config_snapshot/" 2>/dev/null || true
 git status --porcelain > "$LOG_DIR/config_snapshot/git_status.txt" 2>&1 || true
@@ -184,7 +152,6 @@ git diff > "$LOG_DIR/config_snapshot/git_diff.patch" 2>&1 || true
     [[ -f "$DATA_DIR/README.md" ]] && echo "DATA_README_MD5=$(md5sum "$DATA_DIR/README.md" | cut -d' ' -f1)"
 } > "$LOG_DIR/config_snapshot/env.txt"
 
-# Đồng bộ lên Drive mỗi SYNC_EVERY_MIN phút (mặc định 30; 0 = tắt): máy chết giữa chừng vẫn còn các run đã xong.
 SYNC_EVERY_MIN="${SYNC_EVERY_MIN:-30}"
 if command -v rclone &>/dev/null && [[ "$SYNC_EVERY_MIN" -gt 0 ]]; then
     (
@@ -202,11 +169,8 @@ if command -v rclone &>/dev/null && [[ "$SYNC_EVERY_MIN" -gt 0 ]]; then
     echo "Đồng bộ định kỳ mỗi $SYNC_EVERY_MIN phút (PID $SYNC_PID)" | tee -a "$MAIN_LOG"
 fi
 
-# ----------------- BƯỚC 2: CHẠY HUẤN LUYỆN THEO TASK -----------------
 echo "Bắt đầu chạy task: $TASK..." | tee -a "$MAIN_LOG"
 
-# Một bước lỗi không chặn bước sau (các bước độc lập), nhưng được ghi lại: cuối script thoát mã 1, run_metadata.txt
-# ghi [LỖI] và máy chỉ STOP (không destroy) để còn vào xem/chạy lại đúng lệnh.
 FAILED_STEPS=()
 step() {
     local name=$1; shift
@@ -224,7 +188,6 @@ case "$TASK" in
         bash scripts/run_al.sh dot1 2>&1 | tee -a "$MAIN_LOG"
         ;;
     al_next)
-        # Vòng 2 từ model tốt nhất (margin_k) + random so sánh, rồi đợt 2 (B=250, 850). Cần khôi phục campaign dot1 trước.
         CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
         for v in al_margin_k_B500 al_random_B500_s0; do
             for f in "runs/EXP-FB-FT-$v/task_5/task_final.pth" "runs/EXP-FB-FT-$v/task_5/pred_val.npz" "stages/$v.json" "scored/$v/calibration_count_m2.json"; do
@@ -236,8 +199,6 @@ case "$TASK" in
         bash scripts/run_al.sh al_margin_k_B500_r2 al_random_B500_s0_r2 dot2 2>&1 | tee -a "$MAIN_LOG"
         ;;
     al_r3)
-        # Vòng 3 (docs/design/2026-11-07-vong-3): 5 run từ model vòng 2, cùng 1.000 ảnh của margin_k_B500_r2.
-        # Cần campaign đã có al_margin_k_B500_r2 và 5 gói r3 (gpu_bundle_r3/install.sh làm cả hai). Thiếu thì dừng, chưa tốn GPU.
         CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
         R3_RUNS=(al_margin_k_B500_r3_rows al_margin_k_B500_r3_train al_margin_k_B500_r3_real al_margin_k_B500_r3_all
                  al_margin_k_B500_r3_prompt)
@@ -257,7 +218,6 @@ case "$TASK" in
         bash scripts/run_al.sh "${R3_RUNS[@]}" 2>&1 | tee -a "$MAIN_LOG"
         ;;
     al_r4)
-        # Đợt GPU 1 sau vòng 3: B0 -> B4 -> B1 -> (B3). Mỗi bước bỏ qua nếu đã có stage; thiếu đầu vào thì dừng trước khi tốn GPU.
         CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
         SEL="$DATA_DIR/relearn/active/selections"
         NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$SEL/margin_k_B500_r2.json" "$SEL/margin_k_B500_r3.json"
@@ -272,7 +232,6 @@ case "$TASK" in
         for f in "${NEED[@]}"; do
             [[ -f "$f" ]] || { echo "[THIẾU] $f -> chạy scripts/install_r4.sh trước" | tee -a "$MAIN_LOG"; exit 3; }
         done
-        # weights_md5.txt (logs/ của đợt al_r3, đường dẫn ./relearn-fix-v2/...): gói r4 đặt cạnh campaign
         WMD5="${WEIGHTS_MD5:-$CAMP/../weights_md5.txt}"
         if [[ "${SKIP_MD5:-0}" != "1" ]]; then
             [[ -f "$WMD5" ]] || { echo "[THIẾU] $WMD5 (install_r4.sh bước 3; SKIP_MD5=1 để bỏ qua có chủ ý)" | tee -a "$MAIN_LOG"; exit 3; }

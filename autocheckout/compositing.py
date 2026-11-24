@@ -95,7 +95,6 @@ def _place(rng, sample_object, n_objects, size, layout, level, spread=1.0, unifo
             for attempt in range(layout["position_tries"]):
                 if compact or (layout.get("pack_prob", 0.0) > 0 and placed and not uniform
                                and attempt < layout["position_tries"] // 2 and rng.random() < layout["pack_prob"]):
-                    # next to an object already on the tray, centre distance ~ the sum of half sizes
                     anchor = placed[rng.integers(len(placed))]
                     ah, aw = anchor["mask"].shape
                     theta = rng.uniform(0, 2 * np.pi)
@@ -117,7 +116,6 @@ def _place(rng, sample_object, n_objects, size, layout, level, spread=1.0, unifo
                 if not all((visible[i] - c) / area[i] >= layout["min_visible"] for i, c in zip(ids, counts)):
                     continue
                 if compact:
-                    # compact baskets: keep the valid spot nearest the basket centre
                     dist = np.hypot(x + w / 2 - target[0], y + h / 2 - target[1])
                     if best is None or dist < best[0]:
                         best = (dist, x, y, ids, counts)
@@ -143,18 +141,13 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
     """RGB image, uint16 owner map (0 = tray, value = instance_id) and per-object visible labels."""
     layout, scale_cfg, photo = config["layout"], config["scale"], config["photometric"]
     objects = recipe["objects"]
-    # a share of the scenes may hide more of each object (real counters: a few overlapping packs)
     occluded = np.random.default_rng(stable_seed(recipe["seed"], "occluded")).random() \
         < layout.get("occluded_scene_prob", 0.0)
     base_layout, n_retries = layout, layout["scene_retries"]
-    # a basket that found no layout replays its retries at the occluded share's visibility, then once more with
-    # every object one jitter sigma smaller: the area budget lets through a few baskets fuller than the tray
     replays = [False, True] if "occluded_min_visible" in layout and not occluded else [False]
     passes = [(replay, 1.0) for replay in replays] + [(replays[-1], float(np.exp(-scale_cfg["jitter_log_sigma"])))]
     attempts = [(replay, shrink, retry) for replay, shrink in passes for retry in range(n_retries)]
     for attempt, (replay, shrink, retry) in enumerate(attempts):
-        # baskets too full to lie apart get the occluded share's visibility on the last retries, as people
-        # stack packs when the counter runs out of room
         last_resort = replay or ("occluded_min_visible" in base_layout and retry >= n_retries * 3 // 4)
         layout = {**base_layout, "min_visible": base_layout["occluded_min_visible"]} \
             if occluded or last_resort else base_layout
@@ -178,7 +171,7 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
                 * float(np.exp(rng.normal(0, scale_cfg["jitter_log_sigma"])))
             rgba = load_rgba(cutout["file"])
             scale = min(scale, scale_cfg["max_side_frac"] * size / max(rgba.shape[:2]))
-            if rng.random() < layout.get("aligned_prob", 0.0):     # lying square to the tray edges
+            if rng.random() < layout.get("aligned_prob", 0.0):
                 angle = float(90 * rng.integers(4) + rng.normal(0, layout["aligned_jitter_deg"])) % 360
             else:
                 angle = float(rng.uniform(0, 360))
@@ -190,7 +183,7 @@ def render_scene(recipe: dict[str, Any], *, cutouts: dict[str, dict[str, Any]], 
             spread = 1.0 + layout.get("retry_spread_step", 0.0) * retry
             uniform = retry >= layout["scene_retries"] // 2
             order = None
-            if retry >= layout["scene_retries"] * 3 // 4:      # last resort: large objects first
+            if retry >= layout["scene_retries"] * 3 // 4:
                 order = sorted(range(len(objects)), key=lambda i: -cutout_size(objects[i]))
             placed, owner, visible = _place(rng, sample_object, len(objects), size, layout, recipe["level"],
                                             spread, uniform, order)

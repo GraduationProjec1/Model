@@ -86,8 +86,6 @@ def validate_loading_info(info, *, frozen_batch_norm_counters=()):
 
     missing = [n for n in info.get("missing_keys", []) if ".prompts." not in n and not classifier(n)]
     mismatched = [row for row in info.get("mismatched_keys", []) if not classifier(row[0])]
-    # Exact names come from live FrozenBatchNorm modules. Their load hook drops
-    # BatchNorm's nonlearned batch counter; arbitrary weights are still rejected.
     counters = {
         n for n in frozen_batch_norm_counters if n.startswith("model.backbone.") and n.endswith(".num_batches_tracked")
     }

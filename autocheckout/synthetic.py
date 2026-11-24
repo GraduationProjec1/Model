@@ -24,8 +24,8 @@ from autocheckout.rpc import LEVELS
 from autocheckout.sampling import largest_remainder
 
 DESIGN_SOURCE = "val2019"
-GRID = 256  # side of the grid boxes are rasterised on to measure overlap and tray colour
-STEPS = 40  # turntable steps of the RPC train photos, 9 degrees apart
+GRID = 256
+STEPS = 40
 _SOURCE = re.compile(r"^[^_]+?(?:-(?P<placement>[^_]+))?_camera(?P<camera>\d)-(?P<step>\d+)\.(?:jpg|png)$")
 
 

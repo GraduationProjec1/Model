@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Học lại (mode improve) từ thư mục dữ liệu chung ../autocheckout-data (autocheckout/datapaths.py; nơi khác:
-# AC_DATA=/duong/dan). Bản cũ tự đủ relearn_fix_v1:
-#   AC_DATA=../relearn_fix_v1 SETTINGS=configs/training/update_model_relearn_fix_v1.json bash scripts/run_relearn_fix.sh
-#
-#   bash scripts/run_relearn_fix.sh                 # mặc định: split -> baseline -> pilot
-#   bash scripts/run_relearn_fix.sh data            # chỉ dựng dữ liệu pilot, in số (không train)
-#   bash scripts/run_relearn_fix.sh e1              # sau khi pilot qua cổng (go)
-#   bash scripts/run_relearn_fix.sh final_test --confirm-test   # chấm test2019 một lần, khi nhóm đã chốt
-#
-# Bị ngắt thì chạy lại đúng lệnh: bước đã xong được bỏ qua, task dở chạy tiếp từ last.ckpt.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DATA=$(cd "${AC_DATA:-${RELEARN_DATA_ROOT:-$REPO/../autocheckout-data}}" && pwd)
@@ -20,7 +10,7 @@ if [[ -d $DATA/relearn ]]; then
     NEED=(eval/val_full.json eval/test_full.json relearn/variants/pilot/train_task_5_fix.json relearn/SHA256SUMS
           models/full-syn-r1/runs/EXP-FULL-SYN/task_5/task_final.pth models/full-syn-r1/runs/EXP-FULL-SYN-FSA/task_1/hf_model)
     SUMS=$DATA/relearn
-else  # relearn_fix_v1
+else
     NEED=(eval/val_full.json eval/test_full.json variants/pilot/train_task_5_fix.json
           seed/full-syn-r1/runs/EXP-FULL-SYN/task_5/task_final.pth seed/full-syn-r1/runs/EXP-FULL-SYN-FSA/task_1/hf_model)
     SUMS=$DATA

@@ -32,12 +32,10 @@ def preds(rows):
                        boxes=np.array([[r[2], 0, r[2] + 10, 10] for r in rows], dtype=np.float32).reshape(-1, 4))
 
 
-# image 1: a 0 and a 1; image 2: a 1; image 3: a 2
 VAL = coco([[(0, 0), (1, 20)], [(1, 0)], [(2, 0)]])
 
 
 def test_fixed_broken_pairs_and_falls():
-    # base swaps the 1 of image 1 for a 0 and gets images 2-3 right; new gets image 1 right, swaps image 3's 2 for a 1
     base = preds([(1, 0, 0), (1, 0, 20), (2, 1, 0), (3, 2, 0)])
     new = preds([(1, 0, 0), (1, 1, 20), (2, 1, 0), (3, 1, 0)])
     report = sr.compare(VAL, base, new, labels=range(3), rows=[0, 1])
@@ -48,12 +46,10 @@ def test_fixed_broken_pairs_and_falls():
     shares = {s['label']: (s['base'], s['new']) for s in report['per_sku']}
     assert shares == {0: (1.0, 1.0), 1: (0.5, 1.0), 2: (1.0, 0.0)}
     assert report['top_pairs'][0]['pair'] in ([0, 1], [1, 2])
-    # 13/11/2026: the gate's "largest pair" is the pair inside the rows with the most base confusions
     assert report['largest_pair_in_rows'] == {'pair': [0, 1], 'base': 1, 'new': 0}
 
 
 def test_largest_pair_in_rows_ignores_pairs_outside_the_rows_and_ranks_by_base():
-    # image 1: 0 called 1; image 2: 1 called 2 (twice in base, the 1-2 pair is outside rows [0, 1])
     val = coco([[(0, 0)], [(1, 0), (1, 20)]])
     base = preds([(1, 1, 0), (2, 2, 0), (2, 2, 20)])
     new = preds([(1, 1, 0), (2, 1, 0), (2, 1, 20)])
@@ -71,15 +67,14 @@ def test_fell_needs_both_a_recall_drop_and_lost_objects():
     """Gate rule of 12/11/2026: recall -0.03 AND >= 5 right objects lost; SKUs under 30 objects never fall."""
     def sku(objects, base, new):
         return {'label': 0, 'objects': objects, 'base': base, 'new': new}
-    assert sr.fell(sku(150, 0.95, 0.90))                 # -0.05, 7.5 objects
-    assert not sr.fell(sku(150, 0.95, 0.925))            # -0.025: a 2-point wobble (the old rule stopped here)
-    assert not sr.fell(sku(100, 0.95, 0.91))             # -0.04 but only 4 objects
-    assert sr.fell(sku(125, 0.95, 0.91))                 # -0.04, 5 objects
-    assert not sr.fell(sku(29, 1.0, 0.0))                # too few objects to judge
-    # compare() reports both lists: the gate's ``falls`` and the old 2-point ``falls_2pt``
+    assert sr.fell(sku(150, 0.95, 0.90))
+    assert not sr.fell(sku(150, 0.95, 0.925))
+    assert not sr.fell(sku(100, 0.95, 0.91))
+    assert sr.fell(sku(125, 0.95, 0.91))
+    assert not sr.fell(sku(29, 1.0, 0.0))
     report = sr.compare(VAL, preds([(1, 0, 0), (1, 1, 20), (2, 1, 0), (3, 2, 0)]),
                         preds([(1, 0, 0), (1, 1, 20), (2, 1, 0)]), labels=range(3))
-    assert report['falls'] == [] and report['falls_2pt'] == []  # every SKU here has < 30 objects
+    assert report['falls'] == [] and report['falls_2pt'] == []
 
 
 def test_a_missed_object_and_an_extra_box_make_the_image_wrong():
@@ -118,7 +113,6 @@ def test_reproduces_the_cacc_of_the_relearn_gate():
 
 
 def test_per_sku_reports_extra_and_wrongly_called_boxes():
-    # vòng 3 v1.5 (11-C): số box đếm thừa theo SKU (box không khớp vật nào + vật khác bị gọi thành SKU này)
     from types import SimpleNamespace
 
     import numpy as np
@@ -135,5 +129,5 @@ def test_per_sku_reports_extra_and_wrongly_called_boxes():
     base = preds([0, 1], [[0, 0, 10, 10], [20, 0, 30, 10]])
     new = preds([0, 0, 0], [[0, 0, 10, 10], [20, 0, 30, 10], [50, 50, 60, 60]])
     per = {s['label']: s for s in sr.compare(val, base, new, [0, 1])['per_sku']}
-    assert (per[0]['over_base'], per[0]['over_new']) == (0, 2)  # 1 extra box + SKU 1 called 0
+    assert (per[0]['over_base'], per[0]['over_new']) == (0, 2)
     assert (per[1]['over_base'], per[1]['over_new']) == (0, 0)

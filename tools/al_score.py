@@ -43,7 +43,7 @@ from autocheckout.taskcfg import TaskConfig
 from tools.eval_count import CALIBRATION_GRID
 
 STAGE, NMS = 5, 0.45
-UNLEARNED_IOU = 0.5  # D16, as full_syn.score_val
+UNLEARNED_IOU = 0.5
 
 
 def group_labels(cfg: TaskConfig, stage: int = STAGE, by: str = 'task',

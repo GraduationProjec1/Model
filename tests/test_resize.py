@@ -117,7 +117,7 @@ def test_invalid_sources_fail_loudly(resized, tmp_path):
 def test_lost_objects_stop_the_tool(resized, tmp_path):
     _, _, planted, _ = resized
     cocos = copy.deepcopy(planted["cocos"])
-    cocos["test2019"]["annotations"][0]["image_id"] = 10**6  # annotation without an image
+    cocos["test2019"]["annotations"][0]["image_id"] = 10**6
     for source in SOURCES:
         save_json(tmp_path / f"instances_{source}.json", cocos[source])
     with pytest.raises(SystemExit, match="object count changed"):

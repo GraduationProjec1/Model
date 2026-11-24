@@ -12,7 +12,7 @@ def test_sessions_accumulate_with_provenance(tmp_path):
     data = tmp_path / "train.json"
     data.write_text("{}")
     path = tmp_path / "run_info.json"
-    for session in range(2):  # e.g. interrupted, then resumed
+    for session in range(2):
         info = RunInfo(path)
         info.start({"epochs": 6, "log_file": object(), "task_map": {1: ("a", 0, 1)}},
                    files={"train": str(data), "missing": str(tmp_path / "nope.json"), "none": None},
@@ -22,7 +22,7 @@ def test_sessions_accumulate_with_provenance(tmp_path):
     saved = json.loads(path.read_text())
     assert len(saved["sessions"]) == 2
     first = saved["sessions"][0]
-    assert first["args"] == {"epochs": 6}  # non-JSON values (file handles, dicts) are left out
+    assert first["args"] == {"epochs": 6}
     assert len(first["git"]["commit"]) == 40 and "diff" in first["git"]
     assert first["environment"]["torch"].startswith("2.2.2")
     assert first["files"] == {"train": {"path": str(data), "md5": md5_file(data)}}

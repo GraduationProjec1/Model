@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# Run one experiment, task by task, then evaluate it (R2).
-#
-#   bash scripts/run_exp.sh configs/exp/<name>.sh [--shutdown]
-#
-# The config file is sourced; it sets EXP (run name), N_TASKS, ARGS (arguments of pdp/main.py) and
-# optionally REUSE_TASK1 (name of a run whose task_1 is reused, for ablations that only change tasks >= 2)
-# START_TASK (first task to run; E0 trains a single joint task N_TASKS) and SKIP_EVAL (DET: the
-# class-agnostic detector is evaluated through E5).
-# Re-running the same command after an interruption continues where it stopped:
-#   - a task with task_final.pth and both prediction files is skipped;
-#   - a task with task_final.pth but a missing prediction file only gets its predictions rewritten;
-#   - otherwise the task is trained (main.py resumes from task_<t>/last.ckpt if it exists).
-# PRED_SPLITS (default val,test) are the prediction files a finished task must have; they are passed to main.py
-# as --pred_splits (FULL-SYN gate rounds use val only, test is added later).
-# With --shutdown the VM is stopped when the script ends, also after an error.
 set -euo pipefail
 
 CONFIG=${1:?usage: run_exp.sh configs/exp/<name>.sh [--shutdown]}
@@ -90,7 +75,6 @@ if [[ ${EVAL_MODE:-legacy} == calibrated ]]; then
 fi
 $PYTHON -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
     --test-ann "$TASK_DIR/test_full.json" --task-config "$TASK_CFG" > "$RUN_DIR/metrics_count_test.md"
-# Also with one detection per object (class-agnostic NMS, see tools/eval_count.py): both are reported.
 $PYTHON -m tools.eval_count --run-dir "$RUN_DIR" --val-ann "$TASK_DIR/val_full.json" \
     --test-ann "$TASK_DIR/test_full.json" --task-config "$TASK_CFG" --nms-iou 0.5 > "$RUN_DIR/metrics_count_test_nms0.5.md"
 echo "== $EXP finished ($(date '+%F %T'))"

@@ -13,7 +13,7 @@ def test_group_thresholds_to_label_vector_and_review_table(tmp_path):
     search.write_text(json.dumps({'policies': {'nms=0.45+sku': {'nms': 0.45, 'sku_thresholds': {'141': 0.53}}}}))
     out = export(scored, CFG, review_from=search, review_policy='nms=0.45+sku')
     v = out['label_thresholds']
-    assert len(v) == 200 and v[0] == 0.1 and v[199] == 0.5  # label 0 thuộc task 1, label 199 thuộc task 5
+    assert len(v) == 200 and v[0] == 0.1 and v[199] == 0.5
     assert out['nms_iou'] == 0.45 and out['review_score_by_label'] == {'141': 0.53}
 
 

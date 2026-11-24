@@ -54,7 +54,7 @@ def build_tables(runs: list[Path]) -> tuple[list[dict[str, Any]], list[dict[str,
         name = run_dir.name
         cl, count = load_run_metrics(run_dir)
         if cl is None:
-            continue  # nothing to report for this run (metrics_cl_test.json missing)
+            continue
         stages = cl["stages"]
         for stage_key in sorted(stages, key=int):
             s = stages[stage_key]

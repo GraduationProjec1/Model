@@ -37,7 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from autocheckout.taskcfg import TaskConfig
 
-PRIOR_PROB = 0.01  # engine.PRIOR_PROB, the focal-loss prior of the classifier
+PRIOR_PROB = 0.01
 PRIVATE_PROMPT = re.compile(r'^model\.prompts\.private_[pka]_\d+$')
 
 

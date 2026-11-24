@@ -21,14 +21,14 @@ def test_only_correctly_classified_queries_enter_memory(tmp_path, monkeypatch, c
     trainer = make_trainer(args, task_id=1)
     trainer.train()
     monkeypatch.setattr(trainer.model.matcher, "forward", fixed_matcher)
-    with torch.no_grad():  # every query predicts class 1
+    with torch.no_grad():
         head = trainer.model.class_embed[0]
         head.weight.zero_()
         head.bias.fill_(-10.0)
         head.bias[1] = 10.0
 
     batch = make_batch([[0, 1]])
-    for step in range(2):  # the memory is updated every second batch of the last epoch
+    for step in range(2):
         trainer.common_step(batch, step)
 
     cached = {c for c, n in trainer.class_cache_count.items() if n > 0}

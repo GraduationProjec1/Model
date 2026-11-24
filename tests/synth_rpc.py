@@ -33,7 +33,7 @@ for _group, _count in SUPERCATEGORIES.items():
         _id = len(CATEGORIES) + 1
         CATEGORIES.append({"supercategory": _group, "id": _id, "name": f"{_id}_{_group}"})
 OBJECTS_PER_LEVEL = {"easy": (2, 3), "medium": (4, 5), "hard": (6, 7)}
-REGULAR_RUNS = {"val2019": 3, "test2019": 8}  # runs of 3 shots per level
+REGULAR_RUNS = {"val2019": 3, "test2019": 8}
 
 
 def make_raw_rpc(root: Path) -> dict[str, Any]:
@@ -49,7 +49,6 @@ def make_raw_rpc(root: Path) -> dict[str, Any]:
                 used.add(sku_multiset(cats))
                 return cats
 
-    # (source, start time, suffix, level, category ids of the basket, number of shots)
     runs: list[tuple[str, datetime, str, str, list[int], int]] = []
     start = datetime(2018, 8, 27, 9, 0, 0)
     for source in SOURCES:

@@ -28,7 +28,7 @@ def test_matches_paper_formula_averaged_over_layers():
     prompt = make_prompt()
     prompt.set_task_id(1)
     prompt.init_task_prompts()
-    with torch.no_grad():  # make some pairs have angles below 90 degrees
+    with torch.no_grad():
         for e in prompt.e_layers:
             getattr(prompt, f"private_p_{e}")[3] += getattr(prompt, f"shared_p_{e}")[0]
     expected = sum(
@@ -50,6 +50,6 @@ def test_gradients_reach_shared_pool_and_current_private_prompts_only():
     shared_grad = prompt.shared_p_0.grad
     private_grad = prompt.private_p_0.grad
     assert shared_grad is not None and shared_grad.abs().sum() > 0
-    assert private_grad[:3].abs().sum() == 0  # task 1 prompts are frozen (detached)
-    assert private_grad[3:5].abs().sum() > 0  # current task (task 2) prompts
-    assert private_grad[5:].abs().sum() == 0  # future task
+    assert private_grad[:3].abs().sum() == 0
+    assert private_grad[3:5].abs().sum() > 0
+    assert private_grad[5:].abs().sum() == 0

@@ -40,7 +40,6 @@ class CocoEvaluator(object):
         self.img_ids.extend(img_ids)
 
         for iou_type in self.iou_types:
-            # suppress pycocotools prints
             with open(os.devnull, 'w') as devnull:
                 with contextlib.redirect_stdout(devnull):
                     coco_dt = COCO.loadRes(self.coco_gt, results) if results else COCO()
@@ -81,7 +80,6 @@ def merge(img_ids, eval_imgs):
     merged_img_ids = np.array(merged_img_ids)
     merged_eval_imgs = np.concatenate(merged_eval_imgs, 2)
 
-    # keep only unique (and in sorted order) images
     merged_img_ids, idx = np.unique(merged_img_ids, return_index=True)
     merged_eval_imgs = merged_eval_imgs[..., idx]
 
@@ -98,10 +96,6 @@ def create_common_coco_eval(coco_eval, img_ids, eval_imgs):
     coco_eval._paramsEval = copy.deepcopy(coco_eval.params)
 
 
-#################################################################
-# From pycocotools, just removed the prints and fixed
-# a Python3 bug about unicode not defined
-#################################################################
 
 
 def evaluate(self):
@@ -109,14 +103,10 @@ def evaluate(self):
     Run per image evaluation on given images and store results (a list of dict) in self.evalImgs
     :return: None
     '''
-    # tic = time.time()
-    # print('Running per image evaluation...')
     p = self.params
-    # add backward compatibility if useSegm is specified in params
     if p.useSegm is not None:
         p.iouType = 'segm' if p.useSegm == 1 else 'bbox'
         print('useSegm (deprecated) is not None. Running {} evaluation'.format(p.iouType))
-    # print('Evaluate annotation type *{}*'.format(p.iouType))
     p.imgIds = list(np.unique(p.imgIds))
     if p.useCats:
         p.catIds = list(np.unique(p.catIds))
@@ -124,7 +114,6 @@ def evaluate(self):
     self.params = p
 
     self._prepare()
-    # loop through images, area range, max detection number
     catIds = p.catIds if p.useCats else [-1]
 
     if p.iouType == 'segm' or p.iouType == 'bbox':
@@ -144,13 +133,7 @@ def evaluate(self):
         for areaRng in p.areaRng
         for imgId in p.imgIds
     ]
-    # this is NOT in the pycocotools code, but could be done outside
     evalImgs = np.asarray(evalImgs).reshape(len(catIds), len(p.areaRng), len(p.imgIds))
     self._paramsEval = copy.deepcopy(self.params)
-    # toc = time.time()
-    # print('DONE (t={:0.2f}s).'.format(toc-tic))
     return p.imgIds, evalImgs
 
-#################################################################
-# end of straight copy from pycocotools, just removing the prints
-#################################################################

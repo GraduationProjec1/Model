@@ -47,7 +47,7 @@ def collect(release: Path, campaign: Path) -> list[dict]:
 def table(rows: list[dict], base: float | None) -> str:
     head = ('| Run | Chiến lược | Vòng | B | seed | cAcc Val-B (ngưỡng calib) | Δ so với r1 | cAcc (ngưỡng Val-B) | '
             'AP50 SKU khác (trước→sau) | Nhầm trong 17 SKU | Ảnh / box gán nhãn | Cổng | '
-            'cAcc ảnh đã train / pool chưa train |')  # round 3: tools/fit_check.py
+            'cAcc ảnh đã train / pool chưa train |')
     lines = [head, '|' + '---|' * 13]
     fmt = lambda v, p='.4f': '' if v is None else format(v, p)  # noqa: E731
     for r in sorted(rows, key=lambda r: (r['round'], r['budget'], r['strategy'], r['seed'] or 0)):

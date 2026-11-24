@@ -15,27 +15,20 @@ class Prompt(nn.Module):
         self.emb_d = emb_d
         self.key_d = key_dim
         self.n_tasks = n_tasks
-        # F2: one private prompt per class slot of every task. The original hard-coded 80 COCO
-        # classes here, which breaks (index errors or empty task pools) for other class splits.
         self.task_num_classes = list(task_num_classes)
-        # B2: pools used in forward(); both by default (the paper's dual pool)
         self.use_shared = bool(getattr(args, 'use_shared_pool', True))
         self.use_private = bool(getattr(args, 'use_private_pool', True))
-        # round 3 (docs/design/2026-11-07-vong-3): train the private prompts of earlier tasks too (default: frozen)
         self.tune_old_private = bool(getattr(args, 'tune_old_private', False))
         if not (self.use_shared or self.use_private):
             raise ValueError('at least one prompt pool must be used')
         self.total_classes = sum(self.task_num_classes)
         self._init_smart(emb_d, prompt_param)
-        #print(prompt_param)
         self.pool_sizes = list(self.task_num_classes)
-        # print(self.task_num_classes)
         if args.local_query:
             self.query_tf = nn.Sequential(
                 nn.Linear(300 * 256, 300),
             )
 
-        # ---- Shared Pool ----
         for e in self.e_layers:
             e_l = self.e_p_length
             p = tensor_prompt(self.shared_size, e_l, emb_d)
@@ -48,7 +41,6 @@ class Prompt(nn.Module):
             setattr(self, f'shared_k_{e}', k)
             setattr(self, f'shared_a_{e}', a)
 
-        # ---- Private Pool for all tasks ----
         for e in self.e_layers:
             e_l = self.e_p_length
             p = tensor_prompt(self.private_size, e_l, emb_d)
@@ -62,13 +54,11 @@ class Prompt(nn.Module):
             setattr(self, f'private_a_{e}', a)
 
     def _init_smart(self, emb_d, prompt_param):
-        # prompt basic param
         self.shared_size = int(prompt_param[0])
         self.private_size = self.total_classes
         self.e_p_length = int(prompt_param[1])
         self.e_layers = [0, 1, 2, 3, 4, 5]
 
-        # ortho penalty
         self.ortho_mu = prompt_param[2]
 
         self.diversity_lambda = 0.15
@@ -117,20 +107,16 @@ class Prompt(nn.Module):
             else:
                 return (v * u).sum() / denominator * u
 
-        # check if the tensor is 3D and flatten the last two dimensions if necessary
         is_3d = len(vv.shape) == 3
         if is_3d:
             shape_2d = copy.deepcopy(vv.shape)
             vv = vv.view(vv.shape[0], -1)
 
-        # swap rows and columns
         vv = vv.T
 
-        # process matrix size
         nk = vv.size(1)
         uu = torch.zeros_like(vv, device=vv.device)
 
-        # get starting point
         pt = int(self.private_size / (self.n_tasks))
         s = sum(self.pool_sizes[:self.task_count]) if self.task_count > 0 else 0
         f = s + self.pool_sizes[self.task_count]
@@ -159,10 +145,8 @@ class Prompt(nn.Module):
             uk = uu[:, k].clone()
             uu[:, k] = uk / (uk.norm())
 
-        # undo swapping of rows and columns
         uu = uu.T
 
-        # return from 2D
         if is_3d:
             uu = uu.view(shape_2d)
 
@@ -181,10 +165,8 @@ class Prompt(nn.Module):
             shape_2d = copy.deepcopy(vv.shape)
             vv = vv.view(vv.shape[0], -1)
 
-        # swap rows and columns
         vv = vv.T
 
-        # process matrix size
         nk = vv.size(1)
         uu = torch.zeros_like(vv, device=vv.device)
 
@@ -209,10 +191,8 @@ class Prompt(nn.Module):
             uk = uu[:, k].clone()
             uu[:, k] = uk / (uk.norm())
 
-        # undo swapping of rows and columns
         uu = uu.T
 
-        # return from 2D
         if is_3d:
             uu = uu.view(shape_2d)
 
@@ -255,12 +235,10 @@ class Prompt(nn.Module):
         if l not in self.e_layers:
             return None, 0, x_block
 
-        # ---- Get Shared ----
         K_shared = getattr(self, f'shared_k_{l}')
         A_shared = getattr(self, f'shared_a_{l}')
         P_shared = getattr(self, f'shared_p_{l}')
 
-        # ---- Get Private ----
         K = getattr(self, f'private_k_{l}')
         A = getattr(self, f'private_a_{l}')
         p = getattr(self, f'private_p_{l}')
@@ -268,13 +246,12 @@ class Prompt(nn.Module):
         s = sum(self.pool_sizes[:self.task_count]) if self.task_count > 0 else 0
         f = s + self.pool_sizes[self.task_count]
 
-        # freeze/control past tasks
         if train:
             if self.task_count > 0 and not self.tune_old_private:
                 K_private = torch.cat((K[:s].detach().clone(), K[s:f]), dim=0)
                 A_private = torch.cat((A[:s].detach().clone(), A[s:f]), dim=0)
                 P_private = torch.cat((p[:s].detach().clone(), p[s:f]), dim=0)
-            else:  # task 1 (s == 0), or round 3 with --tune_old_private: earlier tasks' prompts train too
+            else:
                 K_private = K[0:f]
                 A_private = A[0:f]
                 P_private = p[0:f]
@@ -282,14 +259,12 @@ class Prompt(nn.Module):
             K_private = K[0:f]
             A_private = A[0:f]
             P_private = p[0:f]
-        # combine (B2: either pool can be left out for ablations)
         pools = [(K_shared, A_shared, P_shared)] if self.use_shared else []
         pools += [(K_private, A_private, P_private)] if self.use_private else []
         K = torch.cat([k for k, _, _ in pools], dim=0)
         A = torch.cat([a for _, a, _ in pools], dim=0)
         P = torch.cat([q for _, _, q in pools], dim=0)
 
-        # ---- attention and cosine sim ----
         a_querry = torch.einsum('bd,kd->bkd', x_querry, A)
         n_K = nn.functional.normalize(K, dim=1)
         q = nn.functional.normalize(a_querry, dim=2)
@@ -300,7 +275,6 @@ class Prompt(nn.Module):
         Ek = P_[:, :i, :]
         Ev = P_[:, i:, :]
 
-        # ---- ortho penalty ----
         loss = 0
         if train and self.ortho_mu > 0:
             loss += ortho_penalty(K) * self.ortho_mu
@@ -321,7 +295,7 @@ def orthonormal_rows(existing, n):
         raise ValueError(f'cannot fit {n} new orthogonal rows next to {existing.shape[0]} in dimension {dim}')
     new = torch.randn(n, dim, dtype=existing.dtype, device=existing.device)
     if existing.shape[0]:
-        basis, _ = torch.linalg.qr(existing.T)  # orthonormal basis of the span of the existing rows
+        basis, _ = torch.linalg.qr(existing.T)
         new = new - (new @ basis) @ basis.T
     q, _ = torch.linalg.qr(new.T)
     return q.T
@@ -363,7 +337,6 @@ class L2Prompt(nn.Module):
         self.same_key_value = same_key_value
 
         if self.prompt_pool:
-            # user prefix style
             if self.use_prefix_tune_for_e_prompt:
                 assert embed_dim % self.num_heads == 0
                 if self.same_key_value:
@@ -383,7 +356,7 @@ class L2Prompt(nn.Module):
                         self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
                     elif prompt_init == 'uniform':
                         self.prompt = nn.Parameter(torch.randn(
-                            prompt_pool_shape))  # num_layers, 2, pool_size, length, num_heads, embed_dim // num_heads
+                            prompt_pool_shape))
                         nn.init.uniform_(self.prompt, -1, 1)
             else:
                 prompt_pool_shape = (self.num_layers, self.pool_size, self.length, embed_dim)
@@ -393,7 +366,6 @@ class L2Prompt(nn.Module):
                     self.prompt = nn.Parameter(torch.randn(prompt_pool_shape))
                     nn.init.uniform_(self.prompt, -1, 1)
 
-        # if using learnable prompt keys
         if prompt_key:
             key_shape = (pool_size, embed_dim)
             if prompt_key_init == 'zero':
@@ -402,8 +374,6 @@ class L2Prompt(nn.Module):
                 self.prompt_key = nn.Parameter(torch.randn(key_shape))
                 nn.init.uniform_(self.prompt_key, -1, 1)
         else:
-            # else use mean of prompt as key
-            # only compatible with prompt, not prefix
             prompt_mean = torch.mean(self.prompt, dim=[0, 2])
             self.prompt_key = prompt_mean
 
@@ -424,43 +394,39 @@ class L2Prompt(nn.Module):
                 x_embed_mean = torch.max(x_embed, dim=1)[0] + 2 * torch.mean(x_embed, dim=1)
             elif self.embedding_key == 'cls':
                 if cls_features is None:
-                    x_embed_mean = torch.max(x_embed, dim=1)[0]  # B, C
+                    x_embed_mean = torch.max(x_embed, dim=1)[0]
                 else:
                     x_embed_mean = cls_features
             else:
                 raise NotImplementedError("Not supported way of calculating embedding keys!")
 
-            prompt_key_norm = self.l2_normalize(self.prompt_key, dim=-1)  # Pool_size, C
-            x_embed_norm = self.l2_normalize(x_embed_mean, dim=-1)  # B, C
+            prompt_key_norm = self.l2_normalize(self.prompt_key, dim=-1)
+            x_embed_norm = self.l2_normalize(x_embed_mean, dim=-1)
 
-            similarity = torch.matmul(prompt_key_norm, x_embed_norm.t())  # pool_size, B or Pool_size, #class, B
-            similarity = similarity.t()  # B, pool_size
+            similarity = torch.matmul(prompt_key_norm, x_embed_norm.t())
+            similarity = similarity.t()
 
-            (similarity_top_k, idx) = torch.topk(similarity, k=self.top_k, dim=1)  # B, top_k
+            (similarity_top_k, idx) = torch.topk(similarity, k=self.top_k, dim=1)
             out['similarity'] = similarity
 
             if self.batchwise_prompt:
                 prompt_id, id_counts = torch.unique(idx, return_counts=True, sorted=True)
-                # In jnp.unique, when the 'size' is specified and there are fewer than the indicated number of elements,
-                # the remaining elements will be filled with 'fill_value', the default is the minimum value along the specified dimension.
-                # Unless dimension is specified, this will be flattend if it is not already 1D.
                 if prompt_id.shape[0] < self.pool_size:
                     prompt_id = torch.cat([prompt_id,
                                            torch.full((self.pool_size - prompt_id.shape[0],), torch.min(idx.flatten()),
                                                       device=prompt_id.device)])
                     id_counts = torch.cat(
                         [id_counts, torch.full((self.pool_size - id_counts.shape[0],), 0, device=id_counts.device)])
-                _, major_idx = torch.topk(id_counts, k=self.top_k)  # top_k
-                major_prompt_id = prompt_id[major_idx]  # top_k
-                # expand to batch
-                idx = major_prompt_id.expand(x_embed.shape[0], -1).contiguous()  # B, top_k
+                _, major_idx = torch.topk(id_counts, k=self.top_k)
+                major_prompt_id = prompt_id[major_idx]
+                idx = major_prompt_id.expand(x_embed.shape[0], -1).contiguous()
 
             if prompt_mask is not None:
-                idx = prompt_mask  # B, top_k
+                idx = prompt_mask
 
             out['prompt_idx'] = idx
             if self.use_prefix_tune_for_e_prompt:
-                batched_prompt_raw = self.prompt[:, :, idx]  # num_layers, B, top_k, length, C
+                batched_prompt_raw = self.prompt[:, :, idx]
                 num_layers, dual, batch_size, top_k, length, num_heads, heads_embed_dim = batched_prompt_raw.shape
                 batched_prompt = batched_prompt_raw.reshape(
                     num_layers, batch_size, dual, top_k * length, num_heads, heads_embed_dim
@@ -472,24 +438,20 @@ class L2Prompt(nn.Module):
                     num_layers, batch_size, top_k * length, embed_dim
                 )
 
-            # pdb.set_trace()
 
-            batched_key_norm = prompt_key_norm[idx]  # B, top_k, C
+            batched_key_norm = prompt_key_norm[idx]
 
             out['selected_key'] = batched_key_norm
             out['prompt_key_norm'] = prompt_key_norm
             out['x_embed_norm'] = x_embed_norm
 
-            # Put pull_constraint loss calculation inside
-            x_embed_norm = x_embed_norm.unsqueeze(1)  # B, 1, C
-            sim = batched_key_norm * x_embed_norm  # B, top_k, C
-            reduce_sim = torch.sum(sim) / x_embed.shape[0]  # Scalar
+            x_embed_norm = x_embed_norm.unsqueeze(1)
+            sim = batched_key_norm * x_embed_norm
+            reduce_sim = torch.sum(sim) / x_embed.shape[0]
 
             out['reduce_sim'] = reduce_sim
 
-            # pdb.set_trace()
         else:
-            # user prefix style
             if self.use_prefix_tune_for_e_prompt:
                 assert embed_dim % self.num_heads == 0
                 if self.same_key_value:
@@ -508,7 +470,7 @@ class L2Prompt(nn.Module):
                         self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
                     elif self.prompt_init == 'uniform':
                         self.prompt = nn.Parameter(
-                            torch.randn(prompt_pool_shape))  # num_layers, 2, length, num_heads, embed_dim // num_heads
+                            torch.randn(prompt_pool_shape))
                         nn.init.uniform_(self.prompt, -1, 1)
                 batched_prompt = self.prompt.unsqueeze(0).expand(-1, x_embed.shape[0], -1, -1, -1)
             else:

@@ -43,7 +43,7 @@ def collect(val, by, extra, pair):
     for a in val['annotations']:
         x, y, w, h = a['bbox']
         gt[a['image_id']].append((a['category_id'], [x, y, x + w, y + h]))
-    cases = defaultdict(list)  # name -> (image id, box, caption)
+    cases = defaultdict(list)
     for image_id, g in gt.items():
         gl, gb = np.array([c for c, _ in g]), np.array([b for _, b in g], dtype=float)
         counted = by.get(image_id, [])

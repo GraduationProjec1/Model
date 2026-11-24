@@ -11,7 +11,7 @@ from augment import TrainAugment, hflip, rotate90
 from datasets.coco_hug import CocoDetection
 from pdp_helpers import small_processor
 
-BOX = [7, 5, 20, 9]  # x, y, w, h on a 60 x 40 image
+BOX = [7, 5, 20, 9]
 
 
 def red_image():
@@ -32,7 +32,7 @@ def test_rotation_moves_boxes_with_the_pixels(k):
     anns = [{"bbox": list(BOX), "category_id": 1, "area": 180}]
     original = copy.deepcopy(anns)
     image, out = rotate90(red_image(), anns, k)
-    assert anns == original  # inputs untouched
+    assert anns == original
     np.testing.assert_allclose(out[0]["bbox"], red_box(image))
     assert out[0]["area"] == 180 and image.size == ((60, 40) if k % 2 == 0 else (40, 60))
 
@@ -54,5 +54,5 @@ def test_dataset_applies_augmentation_without_touching_the_coco_index(tmp_path):
     for _ in range(4):
         pixels, target = dataset[0]
         assert target["boxes"].min() >= 0 and target["boxes"].max() <= 1
-        assert min(pixels.shape[1:]) == 48  # shortest edge from the augmentation
+        assert min(pixels.shape[1:]) == 48
     assert dataset.coco.anns == before

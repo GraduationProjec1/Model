@@ -217,8 +217,6 @@ def _run_logged(command, environment, log_path):
                       process_start=process_start(process.pid), started_at=now(), command=command)
         save_json(receipt, record, indent=2)
         try:
-            # Keep the child's original stdout/stderr log and also forward it
-            # into notebook output while the training cell is still running.
             with log_path.open() as reader:
                 while True:
                     output = reader.read()

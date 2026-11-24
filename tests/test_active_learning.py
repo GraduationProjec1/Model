@@ -19,7 +19,6 @@ def rpc_val(n):
     return {'images': images, 'annotations': annotations, 'categories': [{'id': c} for c in range(n + 1)]}
 
 
-# --- A1 -----------------------------------------------------------------------------------------------------------
 def test_split_is_disjoint_complete_reproducible_and_keeps_groups():
     val = rpc_val(40)
     pool, calib = split_pool_calib(val, calib_frac=0.25, seed=3)
@@ -38,7 +37,6 @@ def test_split_rejects_bad_fraction():
         split_pool_calib(rpc_val(4), calib_frac=1.0)
 
 
-# --- A2 -----------------------------------------------------------------------------------------------------------
 def preds(rows):
     """rows: (image, query, label, score, box)"""
     image, query, label, score, boxes = zip(*rows, strict=True)
@@ -87,7 +85,6 @@ def test_k_larger_than_box_count():
     assert s['mean_k_margin'] == pytest.approx(0.4)
 
 
-# --- A3 -----------------------------------------------------------------------------------------------------------
 def pool(n=20):
     rng = np.random.default_rng(0)
     return [{'image_id': i, 'min_margin': float(rng.random()), 'mean_k_margin': float(rng.random()),

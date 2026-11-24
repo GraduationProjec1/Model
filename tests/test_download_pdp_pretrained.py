@@ -34,7 +34,7 @@ def test_download_pins_revision_filters_files_and_returns_hashes(tmp_path, snaps
     assert download.call_args.kwargs["revision"] == REVISION
     assert set(download.call_args.kwargs["allow_patterns"]) == set(FILES)
     assert download.call_args.kwargs["token"] is False
-    json.dumps(result)  # manifest is directly usable by notebook/CLI
+    json.dumps(result)
 
 
 def test_offline_uses_cache_without_api(tmp_path, snapshot):

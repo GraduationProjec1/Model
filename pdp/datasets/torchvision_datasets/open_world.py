@@ -1,4 +1,3 @@
-# partly taken from https://github.com/pytorch/vision/blob/master/torchvision/datasets/voc.py
 import functools
 import torch
 
@@ -17,7 +16,6 @@ import pdb
 from pycocotools.coco import COCO
 from torchvision.datasets.utils import download_url, check_integrity, verify_str_arg
 
-#OWOD splits
 VOC_CLASS_NAMES_COCOFIED = [
     "airplane",  "dining table", "motorcycle",
     "potted plant", "couch", "tv"
@@ -32,7 +30,7 @@ VOC_CLASS_NAMES = [
     "aeroplane","bicycle","bird","boat","bus","car",
     "cat","cow","dog","horse","motorbike","sheep","train",
     "elephant","bear","zebra","giraffe","truck","person"
-] # n_classes = 19
+]
 
 T2_CLASS_NAMES = [
     "traffic light","fire hydrant","stop sign",
@@ -40,20 +38,20 @@ T2_CLASS_NAMES = [
     "pottedplant","backpack","umbrella","handbag",
     "tie","suitcase","microwave","oven","toaster","sink",
     "refrigerator","bed","toilet","sofa"
-] # n_classes = 21
+]
 
 T3_CLASS_NAMES = [
     "frisbee","skis","snowboard","sports ball",
     "kite","baseball bat","baseball glove","skateboard",
     "surfboard","tennis racket","banana","apple","sandwich",
     "orange","broccoli","carrot","hot dog","pizza","donut","cake"
-] # n_classes = 20
+]
 
 T4_CLASS_NAMES = [
     "laptop","mouse","remote","keyboard","cell phone","book",
     "clock","vase","scissors","teddy bear","hair drier","toothbrush",
     "wine glass","cup","fork","knife","spoon","bowl","tvmonitor","bottle"
-] # n_classes = 20
+]
 
 UNK_CLASS = ["unknown"]
 
@@ -100,7 +98,6 @@ class OWDetection(VisionDataset):
         self.MAX_NUM_OBJECTS = 64
         self.no_cats = no_cats
         self.args = args
-        # import pdb;pdb.set_trace()
 
         for year, image_set in zip(years, image_sets):
 
@@ -110,26 +107,20 @@ class OWDetection(VisionDataset):
             if year == "2007-test":
                 valid_sets.append("test")
 
-            # base_dir = DATASET_YEAR_DICT[year]['base_dir']
             img_root = self.args.data_root
             ann_root = self.args.ann_root
 
             self.coco = COCO(ann_val_json)
 
-            #pdb.set_trace()
 
             if image_set == "test":
-                #image_set = "val"
                 image_dir = os.path.join(img_root, 'val2017')
             else:
                 image_dir = os.path.join(img_root, 'train2017')
 
             annotation_dir = os.path.join(ann_root, 'Annotations')
-            #imageset_dir = os.path.join(ann_root, 'VOC2007')
             imageset_dir = ann_root
 
-            #print (img_root, ann_root)
-            #print (image_dir, annotation_dir, imageset_dir)
 
             if not os.path.isdir(image_dir):
                 raise RuntimeError('Dataset not found or corrupted.' +
@@ -137,7 +128,6 @@ class OWDetection(VisionDataset):
             file_names = self.extract_fns(image_set, imageset_dir)
             self.image_set.extend(file_names)
 
-            #print ('\n here ',file_names[0:10], image_dir)
 
             self.images.extend([os.path.join(image_dir, x + ".jpg") for x in file_names])
             self.annotations.extend([os.path.join(annotation_dir, x + ".xml") for x in file_names])
@@ -192,16 +182,12 @@ class OWDetection(VisionDataset):
         splits_dir = os.path.join(voc_root, 'ImageSets')
         split_f = os.path.join(splits_dir, image_set.rstrip('\n') + '.txt')
 
-        #print (image_set, voc_root, splits_dir, split_f)
 
         with open(os.path.join(split_f), "r") as f:
             file_names = [x.strip() for x in f.readlines()]
-        #print (file_names)
         return file_names
 
-    ### OWOD
     def remove_prev_class_and_unk_instances(self, target):
-        # For training data. Removing earlier seen class objects and the unknown objects..
         prev_intro_cls = self.args.PREV_INTRODUCED_CLS
         curr_intro_cls = self.args.CUR_INTRODUCED_CLS
         valid_classes = range(prev_intro_cls, prev_intro_cls + curr_intro_cls)
@@ -212,7 +198,6 @@ class OWDetection(VisionDataset):
         return entry
 
     def remove_unknown_instances(self, target):
-        # For finetune data. Removing the unknown objects...
         prev_intro_cls = self.args.PREV_INTRODUCED_CLS
         curr_intro_cls = self.args.CUR_INTRODUCED_CLS
         valid_classes = range(0, prev_intro_cls+curr_intro_cls)
@@ -223,17 +208,13 @@ class OWDetection(VisionDataset):
         return entry
 
     def label_known_class_and_unknown(self, target):
-        # For test and validation data.
-        # Label known instances the corresponding label and unknown instances as unknown.
         prev_intro_cls = self.args.PREV_INTRODUCED_CLS
         curr_intro_cls = self.args.CUR_INTRODUCED_CLS
-        total_num_class = self.args.num_classes #81
+        total_num_class = self.args.num_classes
         known_classes = range(0, prev_intro_cls+curr_intro_cls)
         entry = copy.copy(target)
         for annotation in  copy.copy(entry):
-        # for annotation in entry:
             if annotation["category_id"] not in known_classes:
-                #annotation["category_id"] = total_num_class - 1
                 entry.remove(annotation)
         return entry
 
@@ -250,8 +231,6 @@ class OWDetection(VisionDataset):
         img = Image.open(self.images[index]).convert('RGB')
         target, instances = self.load_instances(self.imgids[index])
         
-        #print ('\n target', target)
-        #print ('\n pre', instances)
         if 'train' in image_set:
             instances = self.remove_prev_class_and_unk_instances(instances)
         elif 'test' in image_set:
@@ -259,8 +238,6 @@ class OWDetection(VisionDataset):
         elif 'ft' in image_set:
             instances = self.remove_unknown_instances(instances)
 
-        #print ('\n post', instances)
-        #bre
         w, h = map(target['annotation']['size'].get, ['width', 'height'])
         target = dict(
             image_id=torch.tensor([self.imgids[index]], dtype=torch.int64),

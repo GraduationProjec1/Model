@@ -8,7 +8,7 @@ from tools.make_relearn_config import main, relearn_config
 
 
 def base_config():
-    return TaskConfig.from_dict(task_config_dict(sizes=(3, 2), reserved=2))   # labels 0-2 | 3-4 | reserved 5-6
+    return TaskConfig.from_dict(task_config_dict(sizes=(3, 2), reserved=2))
 
 
 def test_relearn_config_appends_alias_tasks_and_keeps_the_learned_tasks():

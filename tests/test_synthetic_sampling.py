@@ -130,7 +130,7 @@ def test_area_budget_rejects_baskets_that_cannot_fit():
 
 
 def test_relearn_task_scenes_label_the_relearned_skus_and_never_list_them_as_old():
-    cfg = relearn_config(task_config(), [[0, 3], [1]], reserved=1, name="t+relearn")  # task 4 relearns rpc 1, 4
+    cfg = relearn_config(task_config(), [[0, 3], [1]], reserved=1, name="t+relearn")
     cutouts, skus = catalog_and_skus()
     recipes = plan_scenes(4, 300, task_config=cfg, cutouts=cutouts, skus=skus, patterns=PATTERNS,
                           backgrounds=["b1.jpg", "b2.jpg", "b3.jpg"], layout=LAYOUT, seed=7)
@@ -145,8 +145,8 @@ def test_source_view_reads_placement_camera_and_step():
     assert source_view("038900004095_camera2-3.png") == ("front", 2, 3)
 
 
-GOLDEN = {1: "baf43a4aca5a20a9f1a6113096121b01ef1f372e08a80233a354788f21390047",  # plan(task, n=60) before
-          2: "775af6c540dd22996839fa4211abfbcf4a81171e31fc3f62cb9f1d97dc1e8d6e"}  # view_balance existed
+GOLDEN = {1: "baf43a4aca5a20a9f1a6113096121b01ef1f372e08a80233a354788f21390047",
+          2: "775af6c540dd22996839fa4211abfbcf4a81171e31fc3f62cb9f1d97dc1e8d6e"}
 
 
 @pytest.mark.parametrize("layout", [LAYOUT, {**LAYOUT, "view_balance": False}])
@@ -159,7 +159,7 @@ def test_without_view_balance_the_plan_is_unchanged(layout):
 
 
 def test_view_balance_alternates_placements_and_spreads_cutouts():
-    cutouts, skus = catalog_and_skus()  # SKU 1 is flat (camera 2): 6 front and 2 back cutouts
+    cutouts, skus = catalog_and_skus()
     cutouts = [c for c in cutouts if c["rpc_category_id"] != 1]
     cutouts += [{"cutout_id": f"f:{k}", "rpc_category_id": 1, "camera": 2, "source": f"1_camera2-{k + 1}.jpg"}
                 for k in range(6)]

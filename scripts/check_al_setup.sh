@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Kiểm tra máy GPU trước khi chạy active learning / B2 (docs/al/RUNBOOK.md). Không train.
-#   bash scripts/check_al_setup.sh            # nhanh (vài phút)
-#   FULL=1 bash scripts/check_al_setup.sh     # thêm: kiểm SHA256 toàn bộ thư mục dữ liệu (~10-20 phút, một lần)
 set -uo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DATA=${AC_DATA:-$REPO/../autocheckout-data}

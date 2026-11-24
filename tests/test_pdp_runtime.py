@@ -156,7 +156,7 @@ def test_cli_resume_and_predict_rebuild_saved_architecture_without_source_weight
     del saved
     (
         profile / "config.json"
-    ).unlink()  # restart must use checkpoint metadata, not original bootstrap config
+    ).unlink()
 
     conflict = call(["--image_size", "128"])
     assert conflict.returncode != 0 and "resolution" in conflict.stderr.lower()

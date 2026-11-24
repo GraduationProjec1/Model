@@ -28,7 +28,6 @@ imgs=sorted(i['id'] for i in gt['images'])
 res={}
 for k,(f,th) in runs.items():
     d=np.load(f); thr=np.array(th)[grp]
-    # top1 per query
     o=np.lexsort((-d['score'],d['query'],d['image_id'])); 
     iid,q=d['image_id'][o],d['query'][o]; first=np.r_[True,(iid[1:]!=iid[:-1])|(q[1:]!=q[:-1])]
     o=o[first]
@@ -47,7 +46,6 @@ for k,(f,th) in runs.items():
         else: keep=rows
         per[im]=(L[keep],Bx[keep])
     res[k]=per
-# metrics
 def analyse(per):
     correct={}; cnt_err=np.zeros(200); conf=defaultdict(int); miss=np.zeros(200); tp=np.zeros(200); fpcls=np.zeros(200); ngt=np.zeros(200); extra=np.zeros(200)
     for im in imgs:
@@ -55,7 +53,6 @@ def analyse(per):
         pl,pb=per[im]
         gc=np.bincount(gl,minlength=200); pc=np.bincount(pl,minlength=200) if len(pl) else np.zeros(200,int)
         correct[im]=bool((gc==pc).all()); cnt_err+=np.abs(gc-pc); ngt+=gc
-        # greedy matching by IoU>=0.5
         used=set()
         if len(pl):
             M=iou(gb,pb)
@@ -73,7 +70,7 @@ def analyse(per):
 A={k:analyse(v) for k,v in res.items()}
 for k in A: print(k,'cAcc',np.mean(list(A[k]['correct'].values())))
 sets={'task6 (25 SKU học lại)':t6,'task7 (25 SKU chưa học lại)':t7,'150 SKU khác':set(range(200))-RE}
-def wrong_as(a,S): # GT of S predicted as another label
+def wrong_as(a,S):
     return sum(v for (t,p),v in a['conf'].items() if t in S)
 def stolen_by(a,S,T): return sum(v for (t,p),v in a['conf'].items() if t in S and p in T)
 print('\n== Theo vật (GT khớp box IoU>=0.5) ==')
@@ -90,7 +87,6 @@ print('\n== Ảnh ==')
 c1,c2=A['r1']['correct'],A['t6']['correct']
 fixed=[i for i in imgs if not c1[i] and c2[i]]; broken=[i for i in imgs if c1[i] and not c2[i]]
 print('đúng->đúng',sum(c1[i] and c2[i] for i in imgs),'sai->đúng',len(fixed),'đúng->sai',len(broken))
-# what's wrong in broken images under t6: classes with count error
 def errclasses(per,im):
     g=np.bincount([c for c,_ in gimg[im]],minlength=200); pl=per[im][0]; p=np.bincount(pl,minlength=200) if len(pl) else np.zeros(200,int)
     return set(np.flatnonzero(g!=p))

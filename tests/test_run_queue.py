@@ -76,6 +76,6 @@ def test_empty_queue_just_shuts_down(tmp_path):
 
 
 def test_interrupted_experiment_stops_the_queue_and_is_not_marked_finished(tmp_path):
-    configs = {"cut": config("cut", "kill -TERM $$"), "next": config("next")}  # run_exp.sh killed by SIGTERM
+    configs = {"cut": config("cut", "kill -TERM $$"), "next": config("next")}
     assert run_queue(tmp_path, "cut\nnext\n", configs, returncode=143) == []
     assert log_lines(tmp_path) == ["cut interrupted", "queue stopped"]

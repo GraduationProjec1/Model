@@ -23,7 +23,7 @@ def _w(path, obj):
 
 @pytest.fixture
 def release(tmp_path):
-    data = tmp_path / 'data'  # the data folder layout of autocheckout/datapaths.py
+    data = tmp_path / 'data'
     rel = data / 'relearn'
     val_a = _coco([{'id': i, 'file_name': f'val2019/a{i}.jpg', 'width': 10, 'height': 10, 'level': 'easy'}
                    for i in range(1, 9)])
@@ -99,8 +99,8 @@ def test_round2_adds_new_pool_images_to_the_labelled_set(release, tmp_path):
                                               'pool_md5': 'x', 'image_ids': [2, 3]})
     bv.build(release, 'm')
     campaign = tmp_path / 'camp'
-    ids = [1, 2, 3, 4, 5, 6, 7, 8]  # predictions on all of val; calib images (6, 7) must never be picked
-    margins = {1: 0.2, 2: 0.0, 3: 0.0, 4: 0.1, 5: 0.9, 6: 0.0, 7: 0.0, 8: 0.95}  # 8 is a test file
+    ids = [1, 2, 3, 4, 5, 6, 7, 8]
+    margins = {1: 0.2, 2: 0.0, 3: 0.0, 4: 0.1, 5: 0.9, 6: 0.0, 7: 0.0, 8: 0.95}
     rows = [(i, 0, 0, 0.9, [0, 0, 5, 5]) for i in ids] + [(i, 0, 1, 0.9 - margins[i], [0, 0, 5, 5]) for i in ids]
     image, query, label, score, boxes = zip(*rows, strict=True)
     save_predictions(campaign / 'runs/EXP-FB-FT-al_m/task_5/pred_val.npz',
@@ -128,14 +128,13 @@ def test_update_model_al_recipes_and_start(tmp_path):
 
 
 def test_round3_options_rows_repeat_name(release, tmp_path):
-    # vòng 3 (docs/design/2026-11-07-vong-3, Task 4): rows từ file, số lần lặp ảnh thật, tên gói riêng
     rows = tmp_path / 'rows.json'
     rows.write_text(json.dumps([0, 1, 2, 3]))
     m = bv.build(release, 's1', rows=rows, repeat=5, name='al_s1_r3_rows')
     out = release / 'relearn/variants/al_s1_r3_rows'
     assert load_json(out / 'train_rows.json') == [0, 1, 2, 3] and m['rows'] == [0, 1, 2, 3]
     assert m['images_per_source']['real'] == 10 and m['params']['feedback_repeat'] == 5
-    assert not (release / 'relearn/variants/al_s1').exists()  # tên mặc định không bị ghi
+    assert not (release / 'relearn/variants/al_s1').exists()
 
 
 def test_round3_v2_keep_is_seeded_and_guards_rare_classes(release):
@@ -151,7 +150,7 @@ def test_round3_v2_keep_is_seeded_and_guards_rare_classes(release):
     b = bv.build(release, 's1', v2_keep=0.5, min_per_class=1, name='k2')
     assert a['images_per_source']['v2'] == b['images_per_source']['v2'] < 9
     assert a['fixed_part_md5'] == b['fixed_part_md5']
-    with pytest.raises(ValueError):  # gần hết ảnh v2 bị bỏ: lớp 2 trong phần cố định tụt dưới min_per_class
+    with pytest.raises(ValueError):
         bv.build(release, 's1', v2_keep=0.01, min_per_class=1, name='k3')
 
 
@@ -164,7 +163,7 @@ def test_default_build_unchanged(release):
 def _no_face_setup(release, tmp_path):
     """v1.5: rows 1, 2, 3; only SKU 3 has full-face synthetic images. synth_v2 task 1: 6 images of SKU 1, 3 of 2."""
     rel = release / 'relearn/variants/pilot'
-    base = load_json(rel / 'train_task_5_fix.json')  # v2 image 2 -> SKU 2
+    base = load_json(rel / 'train_task_5_fix.json')
     base['images'] += [{'id': 10 + k, 'file_name': f'v2/task_1/{100 + k}.jpg', 'width': 10, 'height': 10,
                         'orig_id': 100 + k, 'source': 'v2'} for k in range(8)]
     base['annotations'] += [{'id': 10 + k, 'image_id': 10 + k, 'category_id': 0, 'bbox': [0, 0, 5, 5], 'area': 25,
@@ -172,7 +171,7 @@ def _no_face_setup(release, tmp_path):
     _w(rel / 'train_task_5_fix.json', base)
     rows, face = tmp_path / 'rows.json', tmp_path / 'selection.json'
     rows.write_text(json.dumps([1, 2, 3]))
-    (tmp_path / 'configs/relearn').mkdir(parents=True)  # the round-3 group (bv.REPO is patched by the tests)
+    (tmp_path / 'configs/relearn').mkdir(parents=True)
     (tmp_path / 'configs/relearn/rows_r3.json').write_text(json.dumps([1, 2, 3]))
     face.write_text(json.dumps({'low': [3], 'partners': [], 'faces': []}))
     synth = release / 'synth_v2'
@@ -182,7 +181,7 @@ def _no_face_setup(release, tmp_path):
             for k in range(6)] + [{'id': 50, 'image_id': 200, 'category_id': 0, 'bbox': [5, 5, 3, 3], 'area': 9,
                                    'iscrowd': 0}]
     images += [{'id': 210 + k, 'file_name': f'images/task_1/{210 + k}.jpg', 'width': 10, 'height': 10,
-                'level': 'hard'} for k in range(3)]  # SKU 2
+                'level': 'hard'} for k in range(3)]
     anns += [{'id': 60 + k, 'image_id': 210 + k, 'category_id': 2, 'bbox': [0, 0, 5, 5], 'area': 25, 'iscrowd': 0}
              for k in range(3)]
     _w(synth / 'tasks/synth_v2/train_task_1_gt_full.json', {'images': images, 'annotations': anns,
@@ -191,7 +190,7 @@ def _no_face_setup(release, tmp_path):
         (synth / 'images/task_1').mkdir(parents=True, exist_ok=True)
         (synth / image['file_name']).write_bytes(b'v')
     (release / 'relearn/images/v2/task_1').mkdir(parents=True, exist_ok=True)
-    (release / 'relearn/images/v2/task_1/203.jpg').write_bytes(b'v')  # already in the release: preferred
+    (release / 'relearn/images/v2/task_1/203.jpg').write_bytes(b'v')
     return rows, face
 
 
@@ -203,16 +202,16 @@ def test_round3_no_face_v2_tops_up_and_is_kept(release, tmp_path, monkeypatch):
     train = load_json(release / 'relearn/variants/nf/train_task_5_fix.json')
     src = {i['id']: i for i in train['images']}
     v2 = [a['category_id'] for a in train['annotations'] if src[a['image_id']]['source'] == 'v2']
-    assert v2.count(1) == 4 and v2.count(2) == 4  # topped up from synth_v2 to the quota
-    assert m['v2_added'] == {'1': 4, '2': 3}  # SKU 2: its one v2 image of the base survived --v2-keep (protected)
+    assert v2.count(1) == 4 and v2.count(2) == 4
+    assert m['v2_added'] == {'1': 4, '2': 3}
     added = [i for i in train['images'] if i['file_name'].startswith('v2/task_1/2')]
-    assert '203.jpg' in {i['file_name'].rsplit('/', 1)[1] for i in added}  # release image picked first
+    assert '203.jpg' in {i['file_name'].rsplit('/', 1)[1] for i in added}
     assert all(i['source'] == 'v2' and i['level'] == 'hard' for i in added)
     assert all((release / 'relearn/images' / i['file_name']).is_file() for i in added)
-    assert sum(1 for a in train['annotations'] if src[a['image_id']]['orig_id'] == 200) in (0, 2)  # full labels
+    assert sum(1 for a in train['annotations'] if src[a['image_id']]['orig_id'] == 200) in (0, 2)
     again = bv.build(release, 's1', rows=rows, no_face_v2=4, full_face=face, v2_keep=0.5, min_per_class=1,
                      name='nf2')
-    assert again['fixed_part_md5'] == m['fixed_part_md5']  # seeded
+    assert again['fixed_part_md5'] == m['fixed_part_md5']
 
 
 def test_round3_no_face_v2_refuses_an_unreachable_quota(release, tmp_path, monkeypatch):
@@ -223,7 +222,6 @@ def test_round3_no_face_v2_refuses_an_unreachable_quota(release, tmp_path, monke
 
 
 def test_round3_no_face_v2_only_for_the_round3_group(release, tmp_path, monkeypatch):
-    # rows_all-like runs: a row outside configs/relearn/rows_r3.json is not topped up
     monkeypatch.setattr(bv, 'REPO', tmp_path)
     rows, face = _no_face_setup(release, tmp_path)
     (tmp_path / 'configs/relearn/rows_r3.json').write_text(json.dumps([2, 3]))
@@ -258,18 +256,17 @@ def test_round4_selects_from_the_round3_model_and_names_the_variant_r4(release, 
     assert out['variant'] == 'al_m_r4' and built['sel'] == 'm_r3' and built['name'] == 'al_m_r4'
     assert built['base'] == 'e1' and built['repeat'] == al_round2.R4_REPEAT and built['v2_keep'] == 0.5
     assert built['no_face_v2'] == 600 and built['rows'].name == 'rows_r3.json'
-    with pytest.raises(ValueError):  # chỉ từ run real của vòng 3
+    with pytest.raises(ValueError):
         al_round2.round2(release, campaign, 'al_m_r3_all', budget=1)
-    only = al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)  # --select-only
+    only = al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
     assert only['variant'] == 'al_m_r4' and only['selection'] == 'm_r3' and only['new_images'] == 1
-    # a shipped selection is reused (same predictions), never selected again; other predictions are refused
     before = (release / 'relearn/active/selections/m_r3.json').read_text()
     again = al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=lambda d, s, **kw: {'variant': 'x'})
     assert again == {'variant': 'x'} and (release / 'relearn/active/selections/m_r3.json').read_text() == before
     shipped = load_json(release / 'relearn/active/selections/m_r3.json')
-    with pytest.raises(ValueError, match='--budget asks 2'):  # budget of the call differs from the shipped file
+    with pytest.raises(ValueError, match='--budget asks 2'):
         al_round2.round2(release, campaign, 'al_m_r3_real', budget=2, build=None)
-    _w(release / 'relearn/active/selections/m_r2.json',  # the round-2 selection changed under the shipped file
+    _w(release / 'relearn/active/selections/m_r2.json',
        {**load_json(release / 'relearn/active/selections/m_r2.json'), 'image_ids': [2, 5]})
     with pytest.raises(ValueError, match='does not continue'):
         al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
@@ -278,5 +275,5 @@ def test_round4_selects_from_the_round3_model_and_names_the_variant_r4(release, 
     _w(release / 'relearn/active/selections/m_r3.json', {**shipped, 'pred_md5': 'other'})
     with pytest.raises(ValueError, match='other predictions'):
         al_round2.round2(release, campaign, 'al_m_r3_real', budget=1, build=None)
-    with pytest.raises(ValueError):  # a seed repeat is not a round-4 start either
+    with pytest.raises(ValueError):
         al_round2._rounds('al_m_r3_real_s1')

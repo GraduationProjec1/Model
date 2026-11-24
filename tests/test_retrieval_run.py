@@ -16,10 +16,9 @@ from tests.coco_helpers import make_ann, make_gt, make_image, three_task_config
 from tools import eval_cl, eval_count
 
 SIDE = 64
-SLOTS = ([4, 4, 28, 28], [36, 36, 60, 60])  # xyxy; every image has one object in each slot
-BACKGROUND_BOX = [40, 4, 60, 20]  # a low-score detector false positive on the empty table
+SLOTS = ([4, 4, 28, 28], [36, 36, 60, 60])
+BACKGROUND_BOX = [40, 4, 60, 20]
 COLORS = [(220, 30, 30), (30, 200, 30), (30, 30, 220), (230, 230, 40), (200, 40, 200), (40, 210, 210)]
-# labels of the objects in (slot 0, slot 1) of each image; task t = labels {2t-2, 2t-1}
 TRAIN = {1: [(0, 1), (1, 2), (0, 4)], 2: [(2, 3), (3, 0), (2, 5)], 3: [(4, 5), (5, 1), (4, 3)]}
 EVAL = {"val": [(0, 2), (4, 1), (3, 5)], "test": [(1, 3), (5, 0), (2, 4), (0, 5)]}
 LEVELS = ("easy", "medium", "hard")
@@ -74,7 +73,7 @@ def data(tmp_path):
     cfg.save(tmp_path / "tasks.json")
     image_dir, task_dir, det_dir = tmp_path / "images", tmp_path / "tasks", tmp_path / "det"
     image_dir.mkdir()
-    for t, layouts in TRAIN.items():  # only task t's objects are labelled in train_task_<t>
+    for t, layouts in TRAIN.items():
         train_path = task_dir / f"train_task_{t}.json"
         _write_images_and_coco(train_path, image_dir, layouts, 100 * t, cfg.task(t).labels)
     for split, first_id in (("val", 1), ("test", 11)):
@@ -103,7 +102,7 @@ def _argv(data, command, *extra):
 
 def _run(monkeypatch, data, command, *extra):
     model = CountingModel()
-    monkeypatch.setattr(retrieval, "load_backbone", lambda name, device: model.to(device))  # like the real loader
+    monkeypatch.setattr(retrieval, "load_backbone", lambda name, device: model.to(device))
     retrieval.main(_argv(data, command, *extra))
     return model
 
@@ -124,13 +123,12 @@ def test_run_output_passes_the_evaluation_tools(monkeypatch, data, mode):
             assert np.all((preds.score >= 0) & (preds.score <= 1))
             rows_per_box = Counter(zip(preds.image_id.tolist(), preds.query.tolist(), strict=True))
             assert max(rows_per_box.values()) <= min(5, seen)
-            assert len(preds.top1_per_query()) == 3 * len(EVAL[split])  # one label per detected box
+            assert len(preds.top1_per_query()) == 3 * len(EVAL[split])
 
     val_ann, test_ann = data["task_dir"] / "val_full.json", data["task_dir"] / "test_full.json"
     cl = eval_cl.evaluate_run(data["run_dir"], "test", test_ann, cfg)
     count = eval_count.evaluate_run(data["run_dir"], val_ann, test_ann, cfg)
     assert set(cl["stages"]) == set(count["stages"]) == {1, 2, 3}
-    # after the last task every object is a learned SKU, and all crops of one SKU look alike
     assert cl["stages"][3]["m1"]["mAP_A"]["AP50"] == pytest.approx(1.0)
     assert count["stages"][3]["test"]["overall"]["cAcc"] == pytest.approx(1.0)
 
@@ -139,19 +137,18 @@ def test_memory_holds_per_class_crops_of_the_task_file_only(monkeypatch, data):
     _run(monkeypatch, data, "run")
     for task_id in (1, 2, 3):
         meta, arrays = retrieval.load_arrays(data["emb_dir"] / f"memory_task_{task_id}.npz")
-        assert sorted(arrays["labels"].tolist()) == list(data["cfg"].task(task_id).labels)  # 1 per class
+        assert sorted(arrays["labels"].tolist()) == list(data["cfg"].task(task_id).labels)
         assert set(arrays["image_id"].tolist()) <= {100 * task_id + i for i in range(3)}
         assert (meta["train_file"], meta["per_class"]) == (f"train_task_{task_id}.json", 1)
 
 
 def test_embeddings_are_computed_once_and_reused(monkeypatch, data):
     n_detections = 3 * sum(len(layouts) for layouts in EVAL.values())
-    # detection crops once for the 3 tasks, plus 1 memory crop per class
     assert _run(monkeypatch, data, "run").crops == n_detections + 6
     pred_paths = sorted(data["run_dir"].rglob("pred_*.npz"))
     first = [load_predictions(p) for p in pred_paths]
 
-    assert _run(monkeypatch, data, "run").crops == 0  # everything comes from the cache
+    assert _run(monkeypatch, data, "run").crops == 0
 
     def no_model(name, device):
         raise AssertionError("predict must not load the model")

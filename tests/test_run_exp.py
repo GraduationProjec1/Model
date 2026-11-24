@@ -71,10 +71,10 @@ def test_runs_tasks_then_evaluation_and_resumes_only_missing_work(tmp_path):
     run_dir = tmp_path / "runs" / "demo"
     assert (run_dir / "config.sh").read_text() == CONFIG
 
-    assert run(tmp_path).returncode == 0  # everything done: no training, evaluation again
+    assert run(tmp_path).returncode == 0
     assert main_calls(calls(tmp_path)) == []
 
-    (run_dir / "task_2" / "pred_test.npz").unlink()  # only task 2's predictions are redone
+    (run_dir / "task_2" / "pred_test.npz").unlink()
     assert run(tmp_path).returncode == 0
     redo = main_calls(calls(tmp_path))
     assert len(redo) == 1 and "--start_task 2" in redo[0] and redo[0].endswith("--predict_only 1")

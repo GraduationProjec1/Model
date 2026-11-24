@@ -29,12 +29,11 @@ class FixedOutputs(torch.nn.Module):
 def test_predict_batch_matches_the_original_post_processing():
     torch.manual_seed(0)
     logits, boxes = torch.randn(2, 300, 8), torch.rand(2, 300, 4) * 0.5 + 0.1
-    seen, n_classes = 5, 8  # labels 5, 6 are not learned yet; 7 is the unused last slot
+    seen, n_classes = 5, 8
     sizes = torch.tensor([[800, 800], [600, 800]])
     ours = predict_batch(FixedOutputs(logits, boxes), None, None, sizes, use_prompts=False, local_query=True,
                          seen_classes=seen)
 
-    # original evaluation: mask unlearned logits, drop the last slot, top-100 (query, class) pairs
     masked = logits.clone()
     masked[:, :, list(range(seen, n_classes - 1))] = -10e10
     original = DeformableDetrImageProcessor().post_process_object_detection(
@@ -56,7 +55,7 @@ def test_tasks_write_prediction_files_and_validation_does_not_use_the_teacher(tm
 
     run = tmp_path / "run"
     train_images = len(json.loads((tmp_path / "data/tasks/train_task_2.json").read_text())["images"])
-    assert len(teacher_calls) == math.ceil(train_images / 2)  # training batches only, not validation
+    assert len(teacher_calls) == math.ceil(train_images / 2)
 
     for task_id, seen in ((1, 3), (2, 5)):
         for split in ("val", "test"):
@@ -69,7 +68,6 @@ def test_tasks_write_prediction_files_and_validation_does_not_use_the_teacher(tm
             assert preds.label.max() < seen
             assert (preds.boxes >= -1e-3).all() and (preds.boxes <= IMAGE_SIZE + 1e-3).all()
 
-    # predict-only reloads task_final.pth and reproduces the same predictions
     before = load_predictions(run / "task_2" / "pred_test.npz")
     args.predict_only, args.output_dir = 1, str(run)
     import main as pdp_main

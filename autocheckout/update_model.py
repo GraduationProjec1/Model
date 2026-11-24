@@ -47,41 +47,24 @@ from tools import sku_regression as sr
 
 EXP = 'EXP-FB-FT'
 RECIPE = ('resolution', 'batch_size', 'effective_batch', 'tf32', 'num_workers', 'checkpoint_every_minutes')
-# I8: hyperparameters of each improve run
 VARIANTS = {
     'pilot': dict(epochs=4, lr=2e-5, lr_old=5e-6, lr_drop=3),
     'e1': dict(epochs=6, lr=2e-5, lr_old=5e-6, lr_drop=4),
     'e2': dict(epochs=6, lr=2e-5, lr_old=5e-6, lr_drop=4),
     'round2': dict(epochs=2, lr=1e-5, lr_old=2.5e-6, lr_drop=100),
 }
-# Round 3 (docs/design/2026-11-07-vong-3, 6.5): al_<selection>_r3_<tag>, from the round-2 model. augment (I2) without
-# flips; tune_old_private: the private prompts of tasks 1-4 train too; lr_old 0 freezes every shared part.
 VARIANTS['r3_base'] = dict(VARIANTS['round2'])
 VARIANTS['r3_strong'] = dict(epochs=6, lr=2e-5, lr_old=5e-6, lr_drop=4, augment=1)
 VARIANTS['r3_prompt'] = {**VARIANTS['r3_strong'], 'tune_old_private': 1}
 VARIANTS['r3_freeze'] = {**VARIANTS['r3_strong'], 'lr_old': 0.0}
 R3_TAGS = {'rows': 'r3_base', 'train': 'r3_strong', 'real': 'r3_strong', 'all': 'r3_strong', 'prompt': 'r3_prompt',
            'freeze': 'r3_freeze'}
-# Đợt GPU 1 sau vòng 3 (docs/design/2026-11-12-dot-gpu-1): al_<selection>_r3_<tag>_s<N> lặp lại run <tag> với seed
-# train N (B4, đo nhiễu seed; dữ liệu của <tag>); al_<selection>_r4 là vòng 4 AL từ model _r3_real (B1, công thức
-# r3_strong, tập chọn <selection>_r3 của tools/al_round2.py).
 SEED_TAGS = {'real_s1': ('real', 1)}
 VARIANTS.update({f'{R3_TAGS[data]}_s{seed}': {**VARIANTS[R3_TAGS[data]], 'seed': seed}
                  for data, seed in SEED_TAGS.values()})
 VARIANTS['r4'] = dict(VARIANTS['r3_strong'])
-R4_FROM = 'real'  # the round-3 run a round-4 run starts from (decision of 12/11/2026, §6 of the summary)
-TRAIN_SEED = 0  # --seed of configs/exp/native/common.sh: every run before B4 trained with it
-# Gates of the plan, written before any run. gain: least cAcc-M2 gain on Val-B (strict: must be > 0);
-# pair_drop: least relative fall of the confusions inside the retrained pairs; other_drop: largest AP50 fall of the
-# SKUs not retrained; max_falls: SKUs (>= 30 objects) that fell by tools.sku_regression.fell (recall -0.03 and
-# >= 5 right objects lost; before 12/11/2026: share of right objects -0.02).
-# 12/11/2026 (docs/02-cac-lan-train/08-2026-11-12-tong-ket-va-ke-hoach.md, 2.4 and 6): pair_drop 0.30 -> 0.25 and
-# max_falls -> 10 with the new fall rule. 18 of 20 variants of rounds 1-3 stopped on 1-9 SKUs losing 3-6 objects while
-# cAcc-M2 rose 10-23 points; with these rules 16 of 18 pass and al_margin_k_B500_r3_train (17 falls) still stops.
-# 13/11/2026 (doc 08 §2.4): top_pair_rise: largest rise of the pair inside the rows with the most base confusions
-# (tools.sku_regression largest_pair_in_rows; r3_train cut its pairs 9.7 % but 162<->186 rose 99 -> 108). A round
-# that starts from an improved model (round2, r3, r4) needs a pair fall of 0.10, not 0.25: its confusions left are
-# fewer and harder (rounds 1: 36-66 %, round 2: 15-16 %, r3_real: 29 %).
+R4_FROM = 'real'
+TRAIN_SEED = 0
 FIRST_PAIR_DROP, LATER_PAIR_DROP, TOP_PAIR_RISE = 0.25, 0.10, 0.05
 GATES = {
     'pilot': dict(gain=0.0, strict=True, sign_p=0.05, pair_drop=FIRST_PAIR_DROP, other_drop=0.01, max_falls=10),
@@ -89,25 +72,17 @@ GATES = {
     'e2': dict(gain=0.0165, strict=False, sign_p=0.05, pair_drop=FIRST_PAIR_DROP, other_drop=0.01, max_falls=10),
     'round2': dict(gain=0.0, strict=False, sign_p=None, pair_drop=LATER_PAIR_DROP, other_drop=0.005, max_falls=10),
 }
-# Round 3 and later: the pilot gate with the pair fall of a later round, only reported; the decision follows the
-# criteria of the design (11-C, 11-D).
 LATER = {**GATES['pilot'], 'pair_drop': LATER_PAIR_DROP}
 GATES.update({kind: dict(LATER) for kind in ('r3_base', 'r3_strong', 'r3_prompt', 'r3_freeze', 'r4')})
 GATES.update({f'{R3_TAGS[data]}_s{seed}': dict(LATER) for data, seed in SEED_TAGS.values()})
 GATES = {kind: {**gate, 'top_pair_rise': TOP_PAIR_RISE} for kind, gate in GATES.items()}
-# Quota of the synthetic images (settings, objects per retrained SKU): from the full-face relearn release, from v2
-# for an SKU the relearn release covers, from v2 for an SKU it does not. Without these keys every synthetic image
-# holding a retrained SKU is taken (the first version: 29,539 v2 images for the pilot rows, 62,061 for e1).
 QUOTA_KEYS = {'quota_relearn': 600, 'quota_v2': 300, 'quota_v2_only': 600}
-# settings 'data_root' (or env AC_DATA / RELEARN_DATA_ROOT): the data folder. Its layout is the one data folder of
-# autocheckout/datapaths.py (../autocheckout-data: eval/, rpc/, models/full-syn-r1/, relearn/, ...), or a legacy
-# self-contained folder made by build_relearn_data.py --self-contained (relearn_fix_v1). Keys set in the settings win.
 DATA_ROOT_LAYOUT = {'eval_root': 'eval', 'raw_root': 'rpc', 'seed_campaign': 'models/full-syn-r1',
                     'pretrained_root': 'pretrained/hf-cache', 'prebuilt_release': 'relearn',
                     'synth_v2_root': 'synth_v2'}
 LEGACY_LAYOUT = {'eval_root': 'eval', 'raw_root': 'archive', 'seed_campaign': 'seed/full-syn-r1',
                  'pretrained_root': 'pretrained/hf-cache', 'prebuilt_release': '.', 'synth_v2_root': 'images/v2'}
-STAGE = N_TASKS  # the improved model is scored as a stage-5 model of the round-1 config
+STAGE = N_TASKS
 
 
 
@@ -144,12 +119,12 @@ def _train_seed(hp: dict) -> int:
 
 def _al_start(plan: dict, name: str) -> tuple[str, str]:
     """(model to start from, run to compare with) of an active-learning variant."""
-    if '_r3_' in name:  # round 3 (and its seed repeats): from the round-2 model of the same selection
+    if '_r3_' in name:
         second = name.rsplit('_r3_', 1)[0] + '_r2'
         if _done(plan, second) is None:
             raise RuntimeError(f'{name} starts from {second}: train {second} first')
         return str(Path(plan['runs']) / f'{EXP}-{second}' / f'task_{STAGE}/task_final.pth'), second
-    if name.endswith('_r4'):  # round 4: from the round-3 model R4_FROM of the same selection
+    if name.endswith('_r4'):
         third = f'{name.removesuffix("_r4")}_r3_{R4_FROM}'
         if _done(plan, third) is None:
             raise RuntimeError(f'{name} starts from {third}: train {third} first')
@@ -162,7 +137,6 @@ def _al_start(plan: dict, name: str) -> tuple[str, str]:
     return str(Path(plan['runs']) / f'{EXP}-{first}' / f'task_{STAGE}/task_final.pth'), first
 
 
-# --- plan ---------------------------------------------------------------------------------------------------------
 def with_data_root(settings: dict) -> dict:
     """The paths of the data folder (``DATA_ROOT_LAYOUT``, else ``LEGACY_LAYOUT``) for the keys the settings leave
     out."""
@@ -236,9 +210,9 @@ def prepare(settings: dict) -> dict:
         min_per_class=int(settings.get('min_per_class', 100)),
         task_config_sha256=sha256_file(task_config), release_config_sha256=None,
         input_sha256={name: sha256_file(eval_root / name) for name in ('val_full.json', 'test_full.json')})
-    if any(k in settings for k in QUOTA_KEYS):  # synthetic images by a quota of objects per retrained SKU
+    if any(k in settings for k in QUOTA_KEYS):
         plan['quota'] = {k.removeprefix('quota_'): int(settings.get(k, v)) for k, v in QUOTA_KEYS.items()}
-    if settings.get('prebuilt_release'):  # a release built ahead (build_relearn_data.py)
+    if settings.get('prebuilt_release'):
         plan['prebuilt_release'] = str(resolve(settings['prebuilt_release']))
         plan['prebuilt_sha256'] = sha256_file(Path(plan['prebuilt_release']) / 'SHA256SUMS')
     path = root / 'plan.json'
@@ -272,7 +246,6 @@ def _labels(plan: dict) -> range:
     return range(_cfg(plan).seen_classes(STAGE))
 
 
-# --- scoring ------------------------------------------------------------------------------------------------------
 def _score(plan: dict, run: Path, name: str) -> dict:
     """Task 5 of ``run`` on Val-B, as ``full_syn.score_val`` scores a stage (policies calibrated on Val-B)."""
     val_b = _inputs(plan) / 'val_b/val_full.json'
@@ -320,14 +293,12 @@ def verdict(gate: dict, cacc_base: float, cacc_new: float, comparison: dict, ap_
     pairs = comparison['pair_confusions_in_rows']
     if pairs['new'] > pairs['base'] * (1 - gate['pair_drop']):
         failed.append(f"pair confusions {pairs['base']} -> {pairs['new']} (needs a {gate['pair_drop']:.0%} fall)")
-    # Every row retrained (r3_all): no "other SKU", AP50 is NaN and the condition cannot be judged. Say so instead of
-    # letting the NaN comparison pass silently.
     ap_measured = not (math.isnan(ap_base) or math.isnan(ap_new))
     if ap_measured and ap_base - ap_new > gate['other_drop']:
         failed.append(f"AP50 of the other SKUs {ap_base:.4f} -> {ap_new:.4f} (may fall {gate['other_drop']})")
     if len(comparison['falls']) > gate['max_falls']:
         failed.append(f"{len(comparison['falls'])} SKUs fell (at most {gate['max_falls']})")
-    top = comparison.get('largest_pair_in_rows')  # None: no confusion inside the rows, nothing to judge
+    top = comparison.get('largest_pair_in_rows')
     if top is not None and top['new'] > top['base'] * (1 + gate['top_pair_rise']):
         failed.append(f"largest pair {top['pair']} {top['base']} -> {top['new']} "
                       f"(may rise {gate['top_pair_rise']:.0%})")
@@ -349,7 +320,6 @@ def _criteria(name: str, decision: str, reason: str, **values) -> dict:
     return gate
 
 
-# --- data and training --------------------------------------------------------------------------------------------
 def _union(cocos: list[dict]) -> dict:
     """Images of several COCO files, each image id once (the dry-run fixture repeats the same images)."""
     images, annotations, seen = [], [], set()
@@ -484,7 +454,6 @@ def _link_fsa(plan: dict) -> None:
         raise ValueError(f'{link} points to {link.resolve()}, expected {source}')
 
 
-# --- stages -------------------------------------------------------------------------------------------------------
 def stage_split(plan: dict) -> dict:
     """I2: Val-A (feedback) and Val-B (scoring)."""
     done = _done(plan, 'split')
@@ -517,7 +486,7 @@ def stage_baseline(plan: dict) -> dict:
     pairs = ff.confusion_pairs(val_a, counted, _labels(plan))
     rows = {'pilot': ff.pair_rows(pairs, top=plan['pilot_pairs']),
             'e1': ff.pair_rows(pairs, min_count=plan['e1_min_count'], extra=plan['selection'])}
-    if not rows['pilot'] and plan['dry_run']:  # the six-label fixture may have no confusion: still run the chain
+    if not rows['pilot'] and plan['dry_run']:
         rows = {'pilot': [0, 1], 'e1': [0, 1, 2]}
     if not rows['pilot']:
         raise ValueError('the round-1 model confuses no pair of SKUs on Val-A: nothing to improve')
@@ -545,7 +514,7 @@ def _run_variant(plan: dict, name: str, rows: list[int], feedback: list[int], pr
     with _attempt(plan, name) as (record, attempt):
         task_dir, release, data = _build_data(plan, name, rows, feedback)
         _train(plan, record, attempt, name, task_dir, release, prev, VARIANTS[_kind(name)], splits='val')
-    rows = load_json(task_dir / 'train_rows.json')  # a prebuilt release brings its own rows
+    rows = load_json(task_dir / 'train_rows.json')
     run, root = Path(plan['runs']) / f'{EXP}-{name}', Path(plan['root'])
     score = _score(plan, run, name)
     ref_run = Path(plan['seed_root']) / 'runs' / PDP if reference == 'baseline' else \
@@ -637,7 +606,7 @@ def _link_test_full(plan: dict, name: str) -> Path:
     if link.is_file():
         return link
     link.parent.mkdir(parents=True, exist_ok=True)
-    link.unlink(missing_ok=True)  # a broken link
+    link.unlink(missing_ok=True)
     link.symlink_to(test.resolve())
     return link
 
@@ -659,7 +628,7 @@ def stage_final_test(plan: dict, confirm: bool = False, variant: str | None = No
     else:
         chosen = next((v for v in ('round2', 'e1', 'e2') if (_done(plan, v) or {}).get('gate', {}).get('decision')
                        == 'go'), None)
-    if chosen is None and plan['dry_run']:  # gates are not enforced in a dry run: still exercise the test stage
+    if chosen is None and plan['dry_run']:
         chosen = next((v for v in ('round2', 'e1', 'e2') if _done(plan, v)), None)
     if chosen is None:
         raise RuntimeError('no improve run passed its gate: nothing to test')

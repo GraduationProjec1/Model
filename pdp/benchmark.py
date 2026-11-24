@@ -53,7 +53,6 @@ def bench_train(args, device):
     trainer.train()
     optimizer = trainer.configure_optimizers()['optimizer']
     generator = torch.Generator().manual_seed(0)
-    # P2: the same batches every epoch (--bench_epochs), as a real epoch revisits the same images
     batches = [random_batch(args.batch_size, args.bench_train_size, 12, device, generator,
                             first_id=1 + step * args.batch_size) for step in range(args.bench_steps)]
     timings = []
@@ -67,7 +66,7 @@ def bench_train(args, device):
             optimizer.zero_grad()
             synchronize(device)
             timings.append(time.perf_counter() - start)
-    steady = timings[2:] or timings  # skip warm-up (kernel build, allocator)
+    steady = timings[2:] or timings
     return {'mode': 'train', 'batch_size': args.batch_size, 'size': args.bench_train_size, 'steps': len(timings),
             'seconds_per_image': round(sum(steady) / len(steady) / args.batch_size, 4)}
 
@@ -159,9 +158,8 @@ def bench_stages(args, device):
                 passes['pass2'].append(time.perf_counter() - start)
     finally:
         remove()
-    skip = 2 if args.bench_steps > 2 else 0  # warm-up (kernel build, allocator)
+    skip = 2 if args.bench_steps > 2 else 0
     pass1, pass2 = mean_ms(passes['pass1'][skip:]), mean_ms(passes['pass2'][skip:])
-    # each stage runs once per pass; keep the calls of pass 1 (even indices) after the warm-up
     b, e, d = (mean_ms(stages[name][::2][skip:]) for name in ('backbone', 'encoder', 'decoder'))
     return {'mode': 'stages', 'size': size,
             'backbone_ms': round(b, 3), 'encoder_ms': round(e, 3), 'decoder_ms': round(d, 3),
@@ -205,7 +203,7 @@ def storage_per_class(args):
     """Bytes added per class: private prompts (p, k, a of every layer) and the prototype memory (V5)."""
     layers = 6
     prompt = layers * (args.prompt_len * 256 + 256 + 256) * 4
-    memory = 100 * 256 * 4  # up to 100 cached query vectors of d_model 256, float32
+    memory = 100 * 256 * 4
     return {'prompt_bytes_per_class': prompt, 'prototype_memory_bytes_per_class': memory}
 
 

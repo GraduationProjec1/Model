@@ -35,7 +35,6 @@ from pycocotools.coco import COCO
 from autocheckout.cl_metrics import box_iou, load_coco
 from autocheckout.predictions import Predictions
 
-#: Deterministic grid, plan section 6.5: 0.05..0.95 step 0.01 (91 points).
 THRESHOLD_GRID: tuple[float, ...] = tuple(round(0.05 + 0.01 * i, 2) for i in range(91))
 
 TIE_BREAK_NOTE = "ties broken by the smallest threshold that reaches the maximum cAcc"
@@ -131,7 +130,6 @@ def count_matrix(
     label_order = np.argsort(labels_arr)
     keep = top1.score >= (np.asarray(threshold)[top1.label] if np.ndim(threshold) else threshold)
     rows_img, rows_label = top1.image_id[keep], top1.label[keep].astype(np.int64)
-    # position of each row's image / label in the requested lists; rows not in the lists are dropped
     i = np.clip(np.searchsorted(image_ids_arr, rows_img, sorter=image_order), 0, len(image_ids_arr) - 1)
     c = np.clip(np.searchsorted(labels_arr, rows_label, sorter=label_order), 0, len(labels_arr) - 1)
     found = (image_ids_arr[image_order[i]] == rows_img) & (labels_arr[label_order[c]] == rows_label)
@@ -147,19 +145,15 @@ def counting_scores(pred: np.ndarray, gt: np.ndarray) -> dict[str, float]:
         return {"cAcc": float("nan"), "ACD": float("nan"), "mCCD": float("nan"), "mCIoU": float("nan"),
                 "K": k, "K_eff": 0}
 
-    # score1 (cAcc): fraction of images whose full count vector matches exactly.
     cacc = float(np.mean(np.all(pred == gt, axis=1)))
-    # score2 (ACD): mean over images of the total absolute count difference.
     acd = float(np.sum(np.abs(pred - gt)) / n_images)
 
     class_gt = gt.sum(axis=0)
     has_gt = class_gt > 0
     k_eff = int(has_gt.sum())
     if k_eff:
-        # score4 (mCCD): per class, sum|pred-gt| / sum(gt), averaged over classes with GT.
         class_cd = np.abs(pred - gt).sum(axis=0)
         mccd = float(np.sum(class_cd[has_gt] / class_gt[has_gt]) / k_eff)
-        # score5 (mCIoU): per class, sum(min(pred,gt)) / sum(max(pred,gt)), averaged.
         class_min = np.minimum(pred, gt).sum(axis=0)
         class_max = np.maximum(pred, gt).sum(axis=0)
         mciou = float(np.sum(class_min[has_gt] / class_max[has_gt]) / k_eff)

@@ -7,9 +7,7 @@ from conftest import REPO_ROOT
 
 from pdp_helpers import main_args
 
-# Pilot configs keep the effective batch they were run with on 28/09; everything else uses 4.
 PILOT_EFF_BATCH_32 = {"P1", "P2", "P3", "FSA_pilot"}
-# Runs done before TF32 was enabled (29/09): the pilot, its diagnostics (*_eb4), FSA and DET.
 NO_TF32 = {"FSA", "DET"}
 CONFIGS = sorted(p for p in (REPO_ROOT / "configs/exp").glob("*.sh") if p.name != "common.sh")
 

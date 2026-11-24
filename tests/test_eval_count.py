@@ -13,7 +13,6 @@ def _write_run(tmp_path):
     cfg_path = tmp_path / "tasks.json"
     cfg.save(cfg_path)
 
-    # Only task 1's classes (0, 1) have data; a single stage is enough for this CLI test.
     val_gt = make_gt(images=[make_image(1)], annotations=[make_ann(1, 1, 0, [0, 0, 5, 5])], num_labels=6)
     test_gt = make_gt(
         images=[make_image(10), make_image(11)],
@@ -80,7 +79,7 @@ def test_nms_option_counts_a_duplicated_object_once(tmp_path, monkeypatch):
     run_dir, val_path, test_path, cfg_path = _write_run(tmp_path)
     test_file = run_dir / "task_1" / "pred_test.npz"
     preds = eval_count.load_predictions(test_file)
-    duplicate = Predictions(  # image 10's object reported twice by two queries
+    duplicate = Predictions(
         image_id=[10, 10, 11], query=[0, 1, 0], label=[0, 0, 0], score=[0.9, 0.8, 0.9], boxes=[[0, 0, 5, 5]] * 3,
         meta=preds.meta)
     save_predictions(test_file, duplicate)
@@ -101,7 +100,6 @@ def test_nms_option_counts_a_duplicated_object_once(tmp_path, monkeypatch):
 def test_old_and_new_class_groups_at_stage_2(tmp_path):
     run_dir, val_path, test_path, cfg_path = _write_run(tmp_path)
     cfg = three_task_config()
-    # Test image 10 also holds two task-2 objects (label 2); stage 2 counts only one of them.
     test_gt = load_json(test_path)
     test_gt["annotations"] += [make_ann(3, 10, 2, [10, 10, 15, 15]), make_ann(4, 10, 2, [20, 20, 25, 25])]
     save_json(test_path, test_gt)
@@ -113,14 +111,14 @@ def test_old_and_new_class_groups_at_stage_2(tmp_path):
         image_id=[10, 11, 10], query=[0, 0, 1], label=[0, 0, 2], score=[0.9, 0.9, 0.9],
         boxes=[[0, 0, 5, 5], [0, 0, 5, 5], [10, 10, 15, 15]],
         meta={"task_id": 2, "seen_classes": seen, "split": "test", "ann_md5": md5_file(test_path)}))
-    (run_dir / "task_1").joinpath("pred_test.npz").unlink()  # stage 1's test file no longer matches the GT
+    (run_dir / "task_1").joinpath("pred_test.npz").unlink()
 
     groups = eval_count.evaluate_run(run_dir, val_path, test_path, cfg)["stages"][2]["test_by_task"]
     assert set(groups) == {"task_1", "task_2", "new", "old"}
     assert groups["new"] == groups["task_2"]
     assert groups["new"]["mCCS"] == pytest.approx(0.5) and groups["new"]["mCCD"] == pytest.approx(0.5)
     assert groups["old"]["mCCS"] == pytest.approx(1.0) and groups["old"]["mCCD"] == pytest.approx(0.0)
-    assert groups["old"]["K_eff"] == 1  # label 1 has no GT
+    assert groups["old"]["K_eff"] == 1
 
 
 def test_m2_drops_predictions_on_unlearned_objects_and_images_without_learned_ones(tmp_path):
@@ -134,7 +132,7 @@ def test_m2_drops_predictions_on_unlearned_objects_and_images_without_learned_on
                         (1, 2, 1, 0.9, [30, 30, 40, 40]), (2, 0, 0, 0.9, [0, 0, 10, 10])])
     view, kept = drop_unlearned(load_coco(gt), preds, seen=2, iou_threshold=0.5)
     assert view.getImgIds() == [1]
-    assert sorted(kept.query.tolist()) == [0, 2]    # the box on the unlearned object is gone, a stray box stays
+    assert sorted(kept.query.tolist()) == [0, 2]
 
 
 def test_m2_policy_is_saved_and_applied_on_test(tmp_path, monkeypatch):
@@ -175,7 +173,7 @@ def test_group_thresholds_count_forgotten_and_new_classes_right(tmp_path):
     vector, scores = select_group_thresholds(load_coco(gt), preds, [[0, 1], [2, 3]])
     assert scores["cAcc"] == pytest.approx(1.0) and vector[0] <= 0.3 < 0.4 < vector[1] <= 0.9
     one, one_scores = select_group_thresholds(load_coco(gt), preds, [[0, 1, 2, 3]])
-    assert one == [single] and one_scores == single_scores  # one group = the single threshold
+    assert one == [single] and one_scores == single_scores
 
 
 def test_group_threshold_policy_is_chosen_on_val_and_applied_on_test(tmp_path):
@@ -186,9 +184,9 @@ def test_group_threshold_policy_is_chosen_on_val_and_applied_on_test(tmp_path):
     assert stage["single_threshold_val_scores"]["cAcc"] == pytest.approx(0.5)
     result = eval_count.evaluate_policy(run_dir, tmp_path / "test_full.json", cfg, policy)
     assert result["stages"][2]["test"]["overall"]["cAcc"] == pytest.approx(1.0)
-    assert "/" in eval_count.to_markdown(result)  # one threshold per group in the table
+    assert "/" in eval_count.to_markdown(result)
 
     single = eval_count.calibrate_run(run_dir, tmp_path / "val_full.json", cfg)
-    assert "group_thresholds" not in single["stages"]["2"]  # old policies keep one threshold
+    assert "group_thresholds" not in single["stages"]["2"]
     assert eval_count.evaluate_policy(run_dir, tmp_path / "test_full.json", cfg, single)["stages"][2]["test"][
         "overall"]["cAcc"] == pytest.approx(0.5)

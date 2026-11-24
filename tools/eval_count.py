@@ -184,7 +184,6 @@ def evaluate_policy(run_dir: Path, test_ann_path: Path, cfg: TaskConfig, policy:
 
 def evaluate_run(run_dir: Path, val_ann_path: Path, test_ann_path: Path, cfg: TaskConfig,
                  nms_iou: float = 0.0, *, oracle: bool = False) -> dict[str, Any]:
-    # Compatibility for callers evaluating a subset of stages with both predictions present.
     common = sorted(set(discover_stage_predictions(run_dir, "val")) & set(discover_stage_predictions(run_dir, "test")))
     policy = calibrate_run(run_dir, val_ann_path, cfg, thresholds=THRESHOLD_GRID, nms_ious=[nms_iou], stages=common)
     return evaluate_policy(run_dir, test_ann_path, cfg, policy, oracle=oracle)

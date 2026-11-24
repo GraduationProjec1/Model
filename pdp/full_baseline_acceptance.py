@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from autocheckout.io import (  # noqa: E402 - direct CLI needs the repo root
+from autocheckout.io import (  # noqa: E402
     load_json,
     save_json,
 )
@@ -143,7 +143,6 @@ def exercise_baseline(module, loader, args, output):
     class Interrupt(pl.Callback):
         def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
             if trainer.global_step == 1:
-                # ResumeCheckpoint runs first, at the start of the next batch.
                 assert (output / "last.ckpt").exists()
                 raise PlannedInterruption(
                     "Intentional stop after the first completed optimizer step"
@@ -173,8 +172,6 @@ def exercise_baseline(module, loader, args, output):
         pass
     else:
         raise AssertionError("The controlled interruption did not occur")
-    # Lightning's exception teardown moves the module to CPU. Put it back on the
-    # requested device before the standalone reference prediction, outside fit().
     module.to(device)
     reference = predictions()
     checkpoint_path = output / "last.ckpt"
@@ -186,7 +183,6 @@ def exercise_baseline(module, loader, args, output):
     }
     saved_epoch, saved_step = saved["epoch"], saved["global_step"]
     del saved, first
-    # Corrupt live trainable weights and memory: verification cannot pass using leftover state.
     with torch.no_grad():
         for p in module.parameters():
             if p.requires_grad:
@@ -243,7 +239,6 @@ def exercise_baseline(module, loader, args, output):
     second.fit(module, train_dataloaders=loader, ckpt_path=str(checkpoint_path))
     assert restored and second.global_step == 2 * len(loader)
     assert frozen() == before_frozen
-    # Both checkpoint formats are retained; task_final is weights/memory, not full resume state.
     module.save_task_final(str(output / "task_final.pth"))
     module.model.config.save_pretrained(output / "resolved_model_config")
     module.processor.save_pretrained(output / "processor")
@@ -298,13 +293,11 @@ def run_resolution(config, resolution, output):
         and not profile.with_box_refine
         and profile.use_timm_backbone
     )
-    # The detector snapshot contains the backbone; do not ask timm to download it again.
     profile.use_pretrained_backbone = False
     native = detr.MultiScaleDeformableAttention is not None
     assert native or not config["require_custom_kernel"], str(detr.KERNEL_LOAD_ERROR)
     profile.disable_custom_kernels = not native
     if native:
-        # Reuse the existing CUDA forward/backward equivalence test, excluding its speed benchmark.
         sys.path.insert(0, str(REPO / "tests"))
         from test_pdp_f11_kernel import test_kernel_matches_pytorch_forward_and_backward
 
@@ -410,8 +403,6 @@ def run_resolution(config, resolution, output):
 
     with (output / "model.log").open("w") as model_log:
         args.log_file = model_log
-        # Scoped adapters only change full config source and request the HF loading report.
-        # No tiny test factory; engine.local_trainer/common_step/optimizer remain the real code.
         with (
             patch.object(engine, "DeformableDetrConfig", lambda: profile),
             patch.object(
@@ -476,7 +467,6 @@ def main():
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ["MPLCONFIGDIR"] = str(output / "matplotlib")
     os.environ["TORCH_EXTENSIONS_DIR"] = str(output.parent / "torch_extensions")
-    # Default build concurrency is bounded for the user's development machine.
     os.environ.setdefault("MAX_JOBS", "2")
     record = {"status": "RUNNING", "started_at": now(), "resolution": args.resolution}
     save_json(output / "result.json", record, indent=2)

@@ -39,12 +39,12 @@ def test_two_tasks_run_end_to_end_with_any_number_of_epochs(tmp_path, monkeypatc
         assert final["task_id"] == task_id
         assert not list(
             (run / f"task_{task_id}").glob("checkpoint*.pth")
-        )  # no per-epoch full checkpoints
-        info = json.loads((run / f"task_{task_id}" / "run_info.json").read_text())  # R3
+        )
+        info = json.loads((run / f"task_{task_id}" / "run_info.json").read_text())
         assert (
             info["sessions"][-1]["mode"] == "train"
             and "val_full" in info["sessions"][-1]["files"]
         )
     log = (run / "task_2" / "train.log").read_text()
     assert f"from :  {run / 'task_1' / 'task_final.pth'}" in log
-    assert teachers == [2]  # PPG stays on: the teacher of task 2 was built
+    assert teachers == [2]

@@ -34,7 +34,7 @@ def fixed_part_md5(coco: dict) -> str:
 
 def _link_or_copy(source: Path, target: Path) -> None:
     try:
-        os.link(source, target)  # same disk: no second copy (and one copy in a tar of the data folder)
+        os.link(source, target)
     except OSError:
         shutil.copy2(source, target)
 
@@ -88,7 +88,7 @@ def _top_up_v2(data: Layout, train: dict, labels: list[int], quota: int, seed: i
                 in_release = (data.relearn / 'images' / name).is_file()
                 candidates.append((not in_release, image['id'], name, image))
         random.Random(seed + task).shuffle(candidates)
-        for _, _, name, image in sorted(candidates, key=lambda c: c[0]):  # stable: release images first
+        for _, _, name, image in sorted(candidates, key=lambda c: c[0]):
             gain = Counter(a['category_id'] for a in anns[image['id']] if a['category_id'] in need)
             if not gain:
                 continue
@@ -156,14 +156,14 @@ def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_imag
     base_boxes = defaultdict(list)
     for a in base_train['annotations']:
         base_boxes[a['image_id']].append(a)
-    variant = name or f'al_{selection}'  # before the copy loop below reuses ``name``
+    variant = name or f'al_{selection}'
     rows_file = rows
     rows = load_json(rows) if rows is not None else load_json(base_dir / 'train_rows.json')
     no_face = []
     if no_face_v2 is not None:
         sel_file = load_json(full_face or REPO / 'configs/relearn/selection.json')
         face = set(sel_file['low']) | set(sel_file['partners']) | set(sel_file['faces'])
-        no_face = sorted((set(rows) & set(load_json(REPO / 'configs/relearn/rows_r3.json'))) - face)  # r3 group only
+        no_face = sorted((set(rows) & set(load_json(REPO / 'configs/relearn/rows_r3.json'))) - face)
     kept = _keep_v2(base_train, v2_keep, min_per_class, protect=no_face) if v2_keep is not None else None
     for image in base_train['images']:
         if image.get('source') != 'real' and (kept is None or image['id'] in kept):
@@ -187,7 +187,7 @@ def build(data_root: Path | None, selection: str, base: str = 'pilot', copy_imag
             if not (target / name).is_file():
                 _link_or_copy(data.rpc / 'val2019' / name, target / name)
                 copied += 1
-        for image, _ in added:  # v1.5: v2 images not yet in the release, from synth_v2/images
+        for image, _ in added:
             target_v2 = release / 'images' / image['file_name']
             if not target_v2.is_file():
                 task_dir, file = image['file_name'].split('/')[1:]

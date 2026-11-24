@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Pack the data the relearn run (tasks 6-7, notebook 07) needs on the GPU machine into one tar, to upload to Google
-# Drive. Receipts as scripts/pack_full_syn_data.sh.
-#
-#   bash scripts/pack_relearn_data.sh [synthetic release] [seed campaign]
-#
-# The eval set, val/test photos and pretrained weights are not packed again: on a new vast machine also extract the
-# full_syn_rpc_synth_v2_v1_<date>.tar of the M5 run. Of the seed only what relearn reads: its plan and stages, the
-# task-5 model (expanded and scored on val), and the FSA backbone (stage 5 only is scored, so no tasks 1-4 or policies).
 set -euo pipefail
 RELEASE=${1:-rpc_synth_relearn_v1}
 SEED=${2:-data/training/full-syn-r1}

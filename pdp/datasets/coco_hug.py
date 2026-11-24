@@ -1,11 +1,3 @@
-# ------------------------------------------------------------------------
-# Deformable DETR
-# Copyright (c) 2020 SenseTime. All Rights Reserved.
-# Licensed under the Apache License, Version 2.0 [see LICENSE for details]
-# ------------------------------------------------------------------------
-# Modified from DETR (https://github.com/facebookresearch/detr)
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-# ------------------------------------------------------------------------
 
 """
 COCO dataset which returns image_id for evaluation.
@@ -28,11 +20,10 @@ class CocoDetection(torchvision.datasets.CocoDetection):
     def __init__(self, img_folder, ann_file, processor, augment=None):
         super(CocoDetection, self).__init__(img_folder, ann_file)
         self.processor = processor
-        self.augment = augment  # I2: training augmentation (see augment.py); None for evaluation
+        self.augment = augment
         
     def collate_fn(self, batch):
         pixel_values = [item[0] for item in batch]
-        #print(pixel_values)
         encoding = self.processor.pad(pixel_values, return_tensors="pt")
         labels = [item[1] for item in batch]
         batch = {}
@@ -42,7 +33,6 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         return batch
 
     def __getitem__(self, idx):
-        # read in PIL image and target in COCO format
         img, target = super(CocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
         size = {}
@@ -51,9 +41,8 @@ class CocoDetection(torchvision.datasets.CocoDetection):
             size = {'size': processor_size}
         target = {'image_id': image_id, 'annotations': target}
         
-        # preprocess image and target (converting target to DETR format, resizing + normalization of both image and target)
         encoding = self.processor(images=img, annotations=target, return_tensors="pt", **size)
-        pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
-        target = encoding["labels"][0] # remove batch dimension
+        pixel_values = encoding["pixel_values"].squeeze()
+        target = encoding["labels"][0]
         
         return pixel_values, target

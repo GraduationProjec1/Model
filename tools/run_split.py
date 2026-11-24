@@ -24,10 +24,10 @@ from autocheckout import full_syn
 from autocheckout.datapaths import Layout
 from autocheckout.io import load_json, save_json
 
-MID_STAGE, MID_R1_STAGE, MID_DROP = 3, 2, 0.03            # plan 5: 125 SKUs, Val-A pool, 3.0 points
-PRECISION_FLOOR = {task: 0.97 for task in (2, 3, 4, 5)}   # plan 5 (R13): from task 6 on, only logged
-MILESTONES = {3: 2, 5: 3, 7: 4, 9: 5}                     # 12x stage -> r1 stage with the same SKUs learned
-GRIDS = {'grid10': None, 'grid02': 0.02}                  # R1: threshold grid from 0.10 (as r1) and from 0.02
+MID_STAGE, MID_R1_STAGE, MID_DROP = 3, 2, 0.03
+PRECISION_FLOOR = {task: 0.97 for task in (2, 3, 4, 5)}
+MILESTONES = {3: 2, 5: 3, 7: 4, 9: 5}
+GRIDS = {'grid10': None, 'grid02': 0.02}
 
 
 def real_settings(path: str, data: Layout) -> dict:
