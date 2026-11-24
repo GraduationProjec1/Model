@@ -27,7 +27,8 @@ from autocheckout.predictions import load_predictions, save_predictions
 
 N_TASKS = 5  # data tasks of the locked 100+4x25 protocol; a campaign's own count is _n_tasks(plan)
 # Task sizes a real campaign may train: r1's protocol and its 12+13-SKU split (docs/design/2026-11-09-chia-12-13-sku)
-PROTOCOLS = ([100, 25, 25, 25, 25], [100, 12, 13, 12, 13, 12, 13, 12, 13])
+PROTOCOLS = ([100, 25, 25, 25, 25], [100, 12, 13, 12, 13, 12, 13, 12, 13],
+             [100, 25, 25, 25, 25, 25])  # 225 SKUs, RPC and VN in every task (AN/cyclegan/03 section 1.1)
 
 
 def sha256_file(path: Path) -> str:
@@ -224,6 +225,23 @@ def prepare(settings: dict) -> dict:
                               for t in range(1, n_tasks + 1)],
                 pdp_experiment=experiment, seed_root=str(seed) if seed else '',
                 seed=_seed_identity(seed, experiment) if seed else None)
+    if settings.get('joint_split'):
+        # A7 (AN/cyclegan/03): RPC and VN learned together. joint_split names the images of val_full / test_full by
+        # role (calib, val_b, vn_val, test_rpc, test_vn); thresholds come from calib + vn_val only (joint_vn.py), the
+        # task-1 gate from the user's floor (plan 03 Q5), never from Val-B. Only these campaigns get the keys.
+        if settings.get('task1_min_cacc') is None:
+            raise ValueError('a joint campaign needs task1_min_cacc: the floor the user set for task 1 (plan 03 Q5)')
+        split = resolve(settings['joint_split'])
+        roles = load_json(split)
+        val_ids = {i['id'] for i in load_json(task_dir / 'val_full.json')['images']}
+        test_ids = {i['id'] for i in load_json(task_dir / 'test_full.json')['images']}
+        if not set(roles['calib']) | set(roles['val_b']) | set(roles['vn_val']) <= val_ids or \
+                not set(roles['test_rpc']) | set(roles['test_vn']) <= test_ids:
+            raise ValueError('joint_split lists images that are not in val_full / test_full')
+        if set(roles['calib']) & set(roles['val_b']) or (set(roles['calib']) | set(roles['val_b'])) & set(roles['vn_val']):
+            raise ValueError('joint_split roles overlap')
+        plan.update(joint_split=str(split), joint_split_sha256=sha256_file(split),
+                    task1_min_cacc=float(settings['task1_min_cacc']))
     if settings.get('seed_task_config'):
         # The seed was trained under another task split (chia 12+13 SKU): stage_seed repartitions its task 1. Only
         # campaigns that set it get these keys, so the plans of earlier campaigns keep comparing equal.
@@ -233,7 +251,7 @@ def prepare(settings: dict) -> dict:
         plan.update(seed_task_config=str(seed_cfg), seed_task_config_sha256=sha256_file(seed_cfg))
     path = root / 'plan.json'
     locations = {'root', 'runs', 'release_root', 'eval_root', 'synth_root', 'raw_root', 'task_dir', 'task_config',
-                 'model_config', 'detector_dir', 'backbone_weights', 'seed_root', 'seed_task_config'}
+                 'model_config', 'detector_dir', 'backbone_weights', 'seed_root', 'seed_task_config', 'joint_split'}
     if path.is_file():
         previous = load_json(path)
         if {k: v for k, v in previous.items() if k not in locations} != {k: v for k, v in plan.items()
@@ -415,6 +433,8 @@ def score_val(plan: dict, run: Path, stage: int) -> dict:
     from autocheckout.taskcfg import TaskConfig
     from tools import eval_cl, eval_count
 
+    if plan.get('joint_split'):
+        return _score_joint(plan, run, stage)
     cfg = TaskConfig.load(plan['task_config'])
     val = Path(plan['task_dir']) / 'val_full.json'
     m2 = eval_count.calibrate_run(run, val, cfg, stages=[stage], unlearned_iou=UNLEARNED_IOU,
@@ -514,7 +534,7 @@ def stage_seed(plan: dict) -> dict:
             link.symlink_to(source.resolve())
         elif link.resolve() != source.resolve():
             raise ValueError(f'{link} points to {link.resolve()}, expected {source}')
-    for name in SEED_POLICIES:
+    for name in () if plan.get('joint_split') else SEED_POLICIES:  # joint: thresholds live in task_1 (linked)
         if not (run / name).is_file():
             policy = load_json(seed / 'runs' / PDP / name)
             save_json(run / name, {**policy, 'stages': {'1': policy['stages']['1']}}, indent=2)
@@ -607,6 +627,14 @@ def stage_task1(plan: dict) -> dict:
         _train(plan, record, attempt, experiment, start=1, n=1, epochs=plan['epochs'], splits='val',
                fsa_hf=_fsa_hf(plan))
     report = score_val(plan, Path(plan['runs']) / experiment, 1)
+    if plan.get('joint_split'):
+        # plan 03 Q5: the user's floor on calib cAcc-M2 (RPC); below it the user decides (run (b) or not)
+        value, floor = report['cAcc_m2'], plan['task1_min_cacc']
+        decision = 'go' if value >= floor else 'stop'
+        gate = _gate(plan, 'task 1 floor (user, plan 03 Q5)', decision,
+                     f"calib cAcc-M2 {value:.4f} {'>=' if value >= floor else '<'} {floor}"
+                     + ('' if value >= floor else '; ask the user before going on (C1 (b))'), value=value, threshold=floor)
+        return _finish(plan, 'task1', report, gate)
     colour, decision, reason = task1_decision(report['cAcc_m2'], plan['round'])
     gate = _gate(plan, 'D17 task 1', decision, reason, colour=colour, value=report['cAcc_m2'],
                  green=TASK1_GREEN, red=TASK1_RED, round=plan['round'])
@@ -714,8 +742,9 @@ def stage_tasks(plan: dict, last: int | None = None, min_precision: dict[int, fl
         save_json(run / f'task_{task}/task_log.json', {**report, 'release_config_sha256': plan['release_config_sha256'],
                                                        'input_sha256': plan['input_sha256']}, indent=2)
         reports[task] = report
-        print(f"task {task}: val cAcc M1 {report['cAcc_m1_groups']:.4f} (groups) / {report['cAcc_m1_single']:.4f} "
-              f"(one threshold), pseudo-label precision {precision}, recall {audit.get('recall')}")
+        scores = (f"calib cAcc-M2 {report['cAcc_m2']:.4f}" if plan.get('joint_split') else
+                  f"val cAcc M1 {report['cAcc_m1_groups']:.4f} (groups) / {report['cAcc_m1_single']:.4f} (one threshold)")
+        print(f"task {task}: {scores}, pseudo-label precision {precision}, recall {audit.get('recall')}")
     return _finish(plan, 'tasks', {'stage': last, 'tasks': reports}, None)
 
 
@@ -731,6 +760,45 @@ def pilot_verdict(pilot: dict, seed: dict) -> tuple[str, str]:
     if drop > PILOT_OLD_DROP:
         return 'retry', f'{scores}: gain but task-1 classes forgotten; retry once with a larger feature_kd'
     return 'go', f'{scores}: rebuild the task-1 prototypes, then train tasks 3-5'
+
+
+def _score_joint(plan: dict, run: Path, stage: int, split: str = 'val') -> dict:
+    """Joint campaign (A6/A7): thresholds of ``stage`` chosen on calib + vn_val (val) and saved next to the
+    predictions, or (test) read back from there; scores on Val-B + VN val, or test2019 + VN test. The gate value
+    ``cAcc_m2`` is the calib score: Val-B and test never decide anything."""
+    from autocheckout import joint_vn
+    from autocheckout.io import save_json
+    from autocheckout.taskcfg import TaskConfig
+
+    if sha256_file(Path(plan['joint_split'])) != plan['joint_split_sha256']:
+        raise ValueError('joint_split changed since the campaign was prepared')
+    roles = load_json(plan['joint_split'])
+    cfg = TaskConfig.load(plan['task_config'])
+    ann = Path(plan['task_dir']) / f'{split}_full.json'
+    preds = load_predictions(run / f'task_{stage}/pred_{split}.npz')
+    if preds.meta.get('ann_md5') not in (None, md5_file(ann)):
+        raise ValueError(f'task_{stage}/pred_{split}.npz was not predicted on {ann}')
+    coco = load_json(ann)
+    chosen = run / f'task_{stage}/joint_thresholds.json'
+    if split == 'val':
+        thresholds, selection = joint_vn.choose_thresholds(coco, cfg, preds, stage, calib=roles['calib'],
+                                                           vn_val=roles['vn_val'], unlearned_iou=UNLEARNED_IOU)
+        save_json(chosen, {'thresholds': thresholds, **selection, 'val_md5': md5_file(ann)}, indent=2)
+        rpc, vn = roles['val_b'], roles['vn_val']
+    else:
+        saved = load_json(chosen)
+        thresholds, selection = saved['thresholds'], {k: v for k, v in saved.items() if k != 'thresholds'}
+        rpc, vn = roles['test_rpc'], roles['test_vn']
+    report = joint_vn.report(coco, cfg, preds, stage, thresholds, rpc_ids=rpc, vn_ids=vn,
+                             unlearned_iou=UNLEARNED_IOU)
+    for part in ('rpc', 'vn'):
+        if report[part]:
+            report[part]['right_images'] = len(report[part]['right_images'])
+    info = load_json(run / f'task_{stage}/run_info.json')
+    return {'stage': stage, 'run': str(run), 'cAcc_m2': selection['calib_cAcc'], 'selection': selection,
+            'thresholds_joint': thresholds, 'AP50': {'mAP_A': (report['rpc'] or {}).get('AP50')},
+            'rpc': report['rpc'], 'vn': report['vn'], 'cross': report['cross'],
+            'train_hours': round(info.get('total_seconds', 0) / 3600, 3)}
 
 
 def stage_final_test(plan: dict) -> dict:
@@ -753,6 +821,9 @@ def stage_final_test(plan: dict) -> dict:
     with _attempt(plan, 'final_test') as (record, attempt):
         _train(plan, record, attempt, experiment, start=1, n=_n_tasks(plan), epochs=plan['epochs'], splits='test',
                fsa_hf=_fsa_hf(plan))
+    if plan.get('joint_split'):
+        stages = {str(s): _score_joint(plan, run, s, split='test') for s in range(1, _n_tasks(plan) + 1)}
+        return _finish(plan, 'final_test', {'stage': 'final_test', 'joint_test': stages}, None)
     cfg = TaskConfig.load(plan['task_config'])
     test = Path(plan['task_dir']) / 'test_full.json'
     compare_ann = Path(plan['eval_root']) / 'compare_b12/test_full.json'
@@ -798,11 +869,32 @@ def write_summary(plan: dict) -> Path:
                      f"{pct((pseudo.get('all') or {}).get('precision'))} / {pct(pseudo.get('recall'))} | "
                      f"{filters.get('dropped_i3', '-')} / {filters.get('dropped_f14', '-')} | "
                      f"{report.get('train_hours', '-')} | {gate['decision'] + ': ' + gate['reason'] if gate else ''} |")
+    joint = [(name, r) for name, r in rows if r and 'vn' in r]
+    if joint:  # A7: joint campaign, thresholds on calib + VN val (joint_vn.py)
+        lines += ['', '## RPC + VN (thresholds: RPC per task on calib, one VN threshold on VN val)', '',
+                  '| stage | Val-B cAcc-M2 | VN val cAcc-M2 | VN task 1 / tasks 2-6 cAcc | VN val AP50 | VN->RPC | RPC->VN |',
+                  '|---|---|---|---|---|---|---|']
+        for name, r in joint:
+            vn, cross, groups = r['vn'] or {}, r['cross'], (r['vn'] or {}).get('groups', {})
+            lines.append(f"| {name} | {pct((r['rpc'] or {}).get('cAcc_m2'))} | {pct(vn.get('cAcc_m2'))} | "
+                         f"{pct(groups.get('vn_task_1', {}).get('cAcc'))} / {pct(groups.get('vn_task_2_6', {}).get('cAcc'))}"
+                         f" | {pct(vn.get('AP50'))} | {pct(cross.get('vn_to_rpc', {}).get('rate'))} | "
+                         f"{pct(cross.get('rpc_to_vn', {}).get('rate'))} |")
     stop = (stages.get('tasks') or {}).get('gate')
     if stop:
         lines += ['', f"Tasks 2-{_n_tasks(plan)}: {stop['decision']} - {stop['reason']}"]
     final = stages.get('final_test')
-    if final:
+    if final and 'joint_test' in final:
+        lines += ['', '## Test (scored once, thresholds chosen on val)', '',
+                  '| stage | test2019 cAcc-M2 | test2019 AP50 | VN test cAcc-M2 | VN task 1 / tasks 2-6 | VN->RPC | RPC->VN |',
+                  '|---|---|---|---|---|---|---|']
+        for stage, r in sorted(final['joint_test'].items(), key=lambda kv: int(kv[0])):
+            vn, groups = r['vn'] or {}, (r['vn'] or {}).get('groups', {})
+            lines.append(f"| {stage} | {pct((r['rpc'] or {}).get('cAcc_m2'))} | {pct((r['rpc'] or {}).get('AP50'))} | "
+                         f"{pct(vn.get('cAcc_m2'))} | {pct(groups.get('vn_task_1', {}).get('cAcc'))} / "
+                         f"{pct(groups.get('vn_task_2_6', {}).get('cAcc'))} | "
+                         f"{pct(r['cross'].get('vn_to_rpc', {}).get('rate'))} | {pct(r['cross'].get('rpc_to_vn', {}).get('rate'))} |")
+    elif final:
         lines += ['', '## Test (scored once, policies chosen on val)', '',
                   '| set | stage | AP50 all | cAcc one threshold | cAcc groups |', '|---|---|---|---|---|']
         for name in ('test2019', 'compare_b12'):

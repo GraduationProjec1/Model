@@ -326,3 +326,39 @@ def test_precision_floor_stops_before_training_the_task(tmp_path, monkeypatch):
     assert trained == []
     with pytest.raises(ValueError, match='last must be'):
         full_syn.stage_tasks(plan, last=10)
+
+
+@pytest.mark.slow
+def test_joint_campaign_chooses_on_calib_and_vn_val_and_gates_on_the_user_floor(tmp_path):
+    """A7 (AN/cyclegan/03): with joint_split the stages score with joint_vn; the task-1 gate is the user's floor on
+    calib cAcc-M2, Val-B is only reported, and the final test uses the thresholds saved on val."""
+    from autocheckout import full_syn
+    _, eval_root, _, _ = full_syn._toy_releases(tmp_path / "probe")
+    val = json.loads((eval_root / "val_full.json").read_text())
+    test = json.loads((eval_root / "test_full.json").read_text())
+    ids = sorted(i["id"] for i in val["images"])
+    split = {"calib": ids[::2], "val_b": ids[1::2], "vn_val": [], "test_rpc": [i["id"] for i in test["images"]],
+             "test_vn": []}
+    (tmp_path / "split.json").write_text(json.dumps(split))
+    settings = dict(campaign_id="joint", round=1, artifact_root=str(tmp_path), dry_run=True, batch_size=1,
+                    effective_batch=2, resolution=640, fsa_epochs=8, epochs=16, audit_images=4,
+                    joint_split=str(tmp_path / "split.json"), task1_min_cacc=0.0)
+    with pytest.raises(ValueError, match="task1_min_cacc"):
+        full_syn.prepare({**settings, "campaign_id": "nofloor", "task1_min_cacc": None})
+    with pytest.raises(ValueError, match="overlap"):
+        bad = {**split, "val_b": split["calib"][:1] + split["val_b"]}
+        (tmp_path / "bad.json").write_text(json.dumps(bad))
+        full_syn.prepare({**settings, "campaign_id": "bad", "joint_split": str(tmp_path / "bad.json")})
+    plan = full_syn.prepare(settings)
+    full_syn.stage_fsa(plan)
+    task1 = full_syn.stage_task1(plan)
+    assert task1["gate"]["name"].startswith("task 1 floor") and task1["gate"]["decision"] == "go"
+    assert task1["cAcc_m2"] == task1["selection"]["calib_cAcc"] and task1["vn"] is None
+    assert task1["selection"]["calib_images"] <= len(split["calib"])
+    run = tmp_path / "dry_run/joint/runs/EXP-FULL-SYN"
+    assert json.loads((run / "task_1/joint_thresholds.json").read_text())["thresholds"] == task1["thresholds_joint"]
+    full_syn.stage_tasks(plan)
+    final = full_syn.stage_final_test(plan)
+    assert sorted(final["joint_test"], key=int) == [str(t) for t in range(1, N_TASKS + 1)]
+    assert final["joint_test"]["1"]["thresholds_joint"] == task1["thresholds_joint"]
+    assert "compare_b12" not in final and "RPC + VN" in (tmp_path / "dry_run/joint/SUMMARY.md").read_text()
