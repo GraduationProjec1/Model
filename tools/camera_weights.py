@@ -92,8 +92,20 @@ def cmd_match(args) -> None:
         return tile.convert("RGB")
 
     out = {"per_camera": args.per_camera, "catalog": args.catalog, "seed": args.seed, "skus": {}}
+    if args.resume:                       # chunked runs (MPS memory growth): one seed per SKU, skip SKUs already done
+        out["seed_per_sku"] = True
+        if Path(args.out).exists():
+            prev = load_json(Path(args.out))
+            assert prev.get("seed_per_sku") and prev["catalog"] == args.catalog and prev["per_camera"] == args.per_camera
+            out["skus"] = prev["skus"]
     open_images = {}
-    for sku in sorted(real)[:args.limit or None]:
+    todo = [s for s in sorted(real)[:args.limit or None] if str(s) not in out["skus"]]
+    for k, sku in enumerate(todo):
+        if args.max_skus and k >= args.max_skus:
+            print(f"chunk done, {len(todo) - k} SKUs left", flush=True)
+            return
+        if args.resume:
+            rng = random.Random(f"{args.seed}:{sku}")
         crops = []
         for a in real[sku]:
             im_id = a["image_id"]
@@ -118,8 +130,15 @@ def cmd_match(args) -> None:
                                              for a, c in zip(real[sku], winner)],
                                  "n_cutouts": {str(c): len(cuts[sku][c]) for c in cams},
                                  "best": {str(c): np.round(best[c], 4).tolist() for c in cams}}
-        print(f"SKU {sku}: {len(crops)} objects, counts {out['skus'][str(sku)]['counts']}", flush=True)
+        del crops, real_emb, best
+        if device == "mps":                   # MPS keeps freed buffers cached: footprint grew to 14 GB by SKU 22 (24/11)
+            torch.mps.empty_cache()
+        print(f"SKU {sku}: {len(out['skus'][str(sku)]['matches'])} objects, counts {out['skus'][str(sku)]['counts']}", flush=True)
+        if args.resume:
+            save_json(Path(args.out + ".tmp"), out)
+            os.replace(args.out + ".tmp", args.out)
     save_json(Path(args.out), out)
+    print(f"ALL SKUS DONE ({len(out['skus'])})", flush=True)
 
 
 def cmd_write(args) -> None:
@@ -147,6 +166,8 @@ def main(argv=None) -> None:
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--limit", type=int, default=0, help="first N SKUs only (smoke test)")
     m.add_argument("--out", required=True)
+    m.add_argument("--resume", action="store_true", help="seed per SKU, save after every SKU, skip SKUs in --out")
+    m.add_argument("--max-skus", type=int, default=0, help="with --resume: stop after this many new SKUs")
     w = sub.add_parser("write")
     w.add_argument("--match", type=Path, required=True)
     w.add_argument("--shapes", type=Path, required=True, help="team skus.json holding shape_group")
