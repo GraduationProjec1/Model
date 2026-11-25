@@ -122,6 +122,10 @@ class local_trainer(pl.LightningModule):
 		detr_config.prompt_len = args.prompt_len
 		detr_config.local_query = args.local_query
 		detr_config.per_query_prompt = getattr(args, 'per_query_prompt', 0)
+		detr_config.prompt_cross_attn = getattr(args, 'prompt_cross_attn', 0)
+		detr_config.xattn_alpha_max = getattr(args, 'xattn_alpha_max', 0.5)
+		detr_config.query_proposals = getattr(args, 'query_proposals', 0)
+		detr_config.lambda_prop = getattr(args, 'lambda_prop', 1.0)
 		detr_config.task_num_classes = args.task_num_classes
 		detr_config.use_shared_pool = args.use_shared
 		detr_config.use_private_pool = args.use_private
@@ -483,9 +487,11 @@ class local_trainer(pl.LightningModule):
 		else:
 			query = None
 
+		# C1: the second pass reuses the proposals of the first (same queries, same order for the per-query prompts)
+		given = getattr(outputs, 'proposal_boxes', None) if query is not None else None
 		outputs = self.model(
 			pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True,
-			task_id=self.task_id, **shared)
+			task_id=self.task_id, proposals=given, **shared)
 
 		if self.training and hasattr(outputs, 'last_hidden_state'):
 			is_last_epoch = (self.current_epoch == self.args.epochs - 1) if hasattr(self.args, 'epochs') else False
@@ -592,7 +598,7 @@ class local_trainer(pl.LightningModule):
 	
 	def training_step(self, batch, batch_idx):
 		loss, loss_dict = self.common_step(batch, batch_idx)
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD', 'loss_prop':'PROP'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)
@@ -641,7 +647,9 @@ class local_trainer(pl.LightningModule):
 			return False
 		return self.current_epoch == self.args.epochs - 1
 	def on_train_epoch_end(self):
-		
+		prompts = getattr(self.model.model, 'prompts', None)
+		if prompts is not None and prompts.cross_attn:
+			print(f'B: epoch {self.current_epoch} {prompts.cross_attn_stats()}', file=self.args.log_file)
 
 		is_last_epoch = self.is_last_epoch()
 		if is_last_epoch:
@@ -734,15 +742,23 @@ class local_trainer(pl.LightningModule):
 		os.replace(tmp_path, path)
 		print(f'Model saved to {path}', file=self.args.log_file)
 	
-	def without_query_tf(self, state):
-		"""A: a per-query run started from an image-level checkpoint drops its query_tf weights (no such module)."""
-		if not getattr(self.args, 'per_query_prompt', 0):
-			return state
-		dropped = [k for k in state if '.prompts.query_tf.' in k]
-		if dropped:
-			print(f'A: --per_query_prompt 1 drops {len(dropped)} query_tf weights of the checkpoint: {dropped}',
-				  file=self.args.log_file)
-		return {k: v for k, v in state.items() if k not in dropped}
+	def migrated_state(self, state):
+		"""A checkpoint of a run without the new modules: A drops query_tf (no such module); B (D3 of
+		docs/ai/planning/2026-11-25-plan-B-C1.md) keeps the initial weights of the modules the checkpoint lacks, which
+		leave the outputs unchanged (W = 0). Any other missing weight still fails the strict load."""
+		if getattr(self.args, 'per_query_prompt', 0):
+			dropped = [k for k in state if '.prompts.query_tf.' in k]
+			if dropped:
+				print(f'A: --per_query_prompt 1 drops {len(dropped)} query_tf weights of the checkpoint: {dropped}',
+					  file=self.args.log_file)
+			state = {k: v for k, v in state.items() if k not in dropped}
+		prefixes = ['.prompts.xattn_'] if getattr(self.args, 'prompt_cross_attn', 0) else []
+		prefixes += ['.proposals.'] if getattr(self.args, 'query_proposals', 0) else []
+		current = self.model.state_dict()
+		added = [k for k in current if k not in state and any(p in k for p in prefixes)]
+		if added:
+			print(f'D3: the checkpoint has no {added}; they keep their initial values', file=self.args.log_file)
+		return {**state, **{k: current[k] for k in added}}
 
 	def resume(self, load_path=''):
 		print('\n Resuming model for task ', self.task_id, ' from : ',load_path, file=self.args.log_file)
@@ -750,7 +766,7 @@ class local_trainer(pl.LightningModule):
 			checkpoint = torch.load(load_path, map_location='cpu')
 			runtime.validate_runtime(self.args, checkpoint.get('runtime'))
 			missing_keys, unexpected_keys = self.model.load_state_dict(
-				self.without_query_tf(checkpoint['model']), strict='runtime' in checkpoint)
+				self.migrated_state(checkpoint['model']), strict='runtime' in checkpoint)
 
 			if 'class_query_cache' in checkpoint:
 				self.class_query_cache = checkpoint['class_query_cache']

@@ -224,6 +224,9 @@ class DeformableDetrModelOutput(ModelOutput):
     encoder_attentions: Optional[Tuple[torch.FloatTensor]] = None
     enc_outputs_class: Optional[torch.FloatTensor] = None
     enc_outputs_coord_logits: Optional[torch.FloatTensor] = None
+    proposal_boxes: Optional[torch.FloatTensor] = None
+    proposal_logits: Optional[torch.FloatTensor] = None
+    proposal_coord_logits: Optional[torch.FloatTensor] = None
 
 
 @dataclass
@@ -304,6 +307,43 @@ class DeformableDetrObjectDetectionOutput(ModelOutput):
     encoder_attentions: Optional[Tuple[torch.FloatTensor]] = None
     enc_outputs_class: Optional = None
     enc_outputs_coord_logits: Optional = None
+    proposal_boxes: Optional = None
+
+
+class QueryProposals(nn.Module):
+    """C1 (docs/ai/planning/2026-11-25-plan-B-C1.md): K object queries that start where the encoder sees an object.
+
+    Every encoder position gets an objectness score and a box (anchor of gen_encoder_output_proposals + delta); the
+    top-K boxes become extra queries (position embedding as in two-stage, 2-d reference point = box centre, since
+    the learned queries use 2-d reference points). Its own layers, so `--freeze decoder` does not freeze it and the
+    two-stage modules of HF (only built with config.two_stage) are not needed.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        d = config.d_model
+        self.k = int(config.query_proposals)
+        self.enc_output = nn.Linear(d, d)
+        self.enc_output_norm = nn.LayerNorm(d)
+        self.score = nn.Linear(d, 1)
+        self.box = DeformableDetrMLPPredictionHead(input_dim=d, hidden_dim=d, output_dim=4, num_layers=3)
+        self.pos_trans = nn.Linear(2 * d, 2 * d)
+        self.pos_trans_norm = nn.LayerNorm(2 * d)
+
+    def forward(self, model, memory, padding_mask, spatial_shapes, given=None):
+        """(query_pos, target, reference [B, K, 2], boxes [B, K, 4] logits, scores [B, N, 1], box logits [B, N, 4]).
+        given: the boxes of the first pass, reused so that both passes have the same queries in the same order."""
+        h, anchors = model.gen_encoder_output_proposals(
+            memory, padding_mask, spatial_shapes, project=lambda x: self.enc_output_norm(self.enc_output(x)))
+        scores = self.score(h)
+        coords = self.box(h) + anchors
+        if given is None:
+            valid = torch.isfinite(anchors).all(-1)
+            top = scores[..., 0].masked_fill(~valid, float('-inf')).topk(self.k, dim=1).indices
+            given = coords.gather(1, top.unsqueeze(-1).expand(-1, -1, 4)).detach()
+        pos = self.pos_trans_norm(self.pos_trans(model.get_proposal_pos_embed(given)))
+        query_pos, target = pos.split(memory.shape[-1], dim=2)
+        return query_pos, target, given.sigmoid()[..., :2], given, scores, coords
 
 
 def _get_clones(module, N):
@@ -615,6 +655,7 @@ class DeformableDetrMultiscaleDeformableAttention(nn.Module):
         spatial_shapes=None,
         level_start_index=None,
         output_attentions: bool = False,
+        xattn_delta=None,
     ):
         if position_embeddings is not None:
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
@@ -636,6 +677,13 @@ class DeformableDetrMultiscaleDeformableAttention(nn.Module):
         attention_weights = self.attention_weights(hidden_states).view(
             batch_size, num_queries, self.n_heads, self.n_levels * self.n_points
         )
+        if xattn_delta is not None:
+            # B: corrections from the prompt of each query (one row broadcast over the queries if image-level)
+            delta_offsets, delta_weights = xattn_delta
+            sampling_offsets = sampling_offsets + delta_offsets.view(
+                batch_size, -1, self.n_heads, self.n_levels, self.n_points, 2)
+            attention_weights = attention_weights + delta_weights.view(
+                batch_size, -1, self.n_heads, self.n_levels * self.n_points)
         attention_weights = F.softmax(attention_weights, -1).view(
             batch_size, num_queries, self.n_heads, self.n_levels, self.n_points
         )
@@ -928,6 +976,7 @@ class DeformableDetrDecoderLayer(nn.Module):
         encoder_attention_mask: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = False,
         prompt_list=None,
+        xattn_delta=None,
     ):
         """
         Args:
@@ -977,6 +1026,7 @@ class DeformableDetrDecoderLayer(nn.Module):
             spatial_shapes=spatial_shapes,
             level_start_index=level_start_index,
             output_attentions=output_attentions,
+            xattn_delta=xattn_delta,
         )
 
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
@@ -1045,6 +1095,8 @@ class DeformableDetrPreTrainedModel(PreTrainedModel):
             nn.init.constant_(module.reference_points.bias.data, 0.0)
         if hasattr(module, "level_embed"):
             nn.init.normal_(module.level_embed)
+        if isinstance(module, Prompt) and module.cross_attn:
+            module.reset_cross_attn()  # B: after its Linear children, which apply() visits first
 
 
 DEFORMABLE_DETR_START_DOCSTRING = r"""
@@ -1335,9 +1387,11 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            p_list = None
+            p_list = xattn = None
             if query is not None:
                 p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
+                if p_list is not None and prompts.cross_attn:
+                    xattn = prompts.cross_deltas(*p_list, idx)
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
@@ -1358,6 +1412,7 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
                     encoder_attention_mask=encoder_attention_mask,
                     output_attentions=output_attentions,
                     prompt_list=p_list,
+                    xattn_delta=xattn,
                 )
 
             hidden_states = layer_outputs[0]
@@ -1477,6 +1532,11 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
 
         if not config.two_stage:
             self.query_position_embeddings = nn.Embedding(config.num_queries, config.d_model * 2)
+        self.proposals = None
+        if getattr(config, 'query_proposals', 0):
+            if config.two_stage or getattr(config, 'local_query', 0):
+                raise ValueError('--query_proposals needs learned queries and --local_query 0 (query_tf has 300 rows)')
+            self.proposals = QueryProposals(config)
 
         self.encoder = DeformableDetrEncoder(config)
         self.decoder = DeformableDetrDecoder(config)
@@ -1542,7 +1602,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         pos = torch.stack((pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()), dim=4).flatten(2)
         return pos
 
-    def gen_encoder_output_proposals(self, enc_output, padding_mask, spatial_shapes):
+    def gen_encoder_output_proposals(self, enc_output, padding_mask, spatial_shapes, project=None):
         """Generate the encoder output proposals from encoded enc_output.
 
         Args:
@@ -1587,7 +1647,8 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         object_query = enc_output
         object_query = object_query.masked_fill(padding_mask.unsqueeze(-1), float(0))
         object_query = object_query.masked_fill(~output_proposals_valid, float(0))
-        object_query = self.enc_output_norm(self.enc_output(object_query))
+        project = project or (lambda x: self.enc_output_norm(self.enc_output(x)))
+        object_query = project(object_query)
         return object_query, output_proposals
 
     @add_start_docstrings_to_model_forward(DEFORMABLE_DETR_INPUTS_DOCSTRING)
@@ -1607,6 +1668,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         train=False,
         task_id=0,
         backbone_features: BackboneFeatures | None = None,
+        proposals=None,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         r"""
         Returns:
@@ -1719,6 +1781,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         batch_size, _, num_channels = encoder_outputs[0].shape
         enc_outputs_class = None
         enc_outputs_coord_logits = None
+        proposal_logits = proposal_coords = None
         if self.config.two_stage:
             object_query_embedding, output_proposals = self.gen_encoder_output_proposals(
                 encoder_outputs[0], ~mask_flatten, spatial_shapes
@@ -1744,6 +1807,12 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             query_embed = query_embed.unsqueeze(0).expand(batch_size, -1, -1)
             target = target.unsqueeze(0).expand(batch_size, -1, -1)
             reference_points = self.reference_points(query_embed).sigmoid()
+            if self.proposals is not None:
+                extra_pos, extra_target, extra_reference, proposals, proposal_logits, proposal_coords = self.proposals(
+                    self, encoder_outputs[0], ~mask_flatten, spatial_shapes, given=proposals)
+                query_embed = torch.cat((query_embed, extra_pos), dim=1)
+                target = torch.cat((target, extra_target), dim=1)
+                reference_points = torch.cat((reference_points, extra_reference), dim=1)
             init_reference_points = reference_points
 
         if self.config.use_prompts:
@@ -1788,6 +1857,9 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             encoder_attentions=encoder_outputs.attentions,
             enc_outputs_class=enc_outputs_class,
             enc_outputs_coord_logits=enc_outputs_coord_logits,
+            proposal_boxes=proposals,
+            proposal_logits=proposal_logits,
+            proposal_coord_logits=proposal_coords,
         )
 
 
@@ -1873,6 +1945,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         train = False,
         task_id = None,
         backbone_features: BackboneFeatures | None = None,
+        proposals=None,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrObjectDetectionOutput]:
         r"""
         labels (`List[Dict]` of len `(batch_size,)`, *optional*):
@@ -1930,6 +2003,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             train=train,
             task_id=task_id,
             backbone_features=backbone_features,
+            proposals=proposals,
         )
 
 
@@ -1997,6 +2071,9 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
                     aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
                 weight_dict.update(aux_weight_dict)
             loss = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+            if outputs.proposal_logits is not None:
+                loss_dict['loss_prop'] = self.proposal_loss(outputs, labels, weight_dict)
+                loss = loss + getattr(self.config, 'lambda_prop', 1.0) * loss_dict['loss_prop']
 
         if not return_dict:
             if auxiliary_outputs is not None:
@@ -2025,9 +2102,20 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             init_reference_points=outputs.init_reference_points,
             enc_outputs_class=outputs.enc_outputs_class,
             enc_outputs_coord_logits=outputs.enc_outputs_coord_logits,
+            proposal_boxes=outputs.proposal_boxes,
         )
 
         return dict_outputs
+
+    def proposal_loss(self, outputs, labels, weight_dict):
+        """C1: binary focal + L1 + GIoU of every encoder proposal against every object (class 0 = "object"), as the
+        encoder loss of HF two-stage, with the weights of the main loss."""
+        criterion = DeformableDetrLoss(matcher=self.matcher, num_classes=1, focal_alpha=self.config.focal_alpha,
+                                       losses=["labels", "boxes"], invalid_cls_logits=[])
+        targets = [{**t, "class_labels": torch.zeros_like(t["class_labels"])} for t in labels]
+        terms = criterion({"logits": outputs.proposal_logits, "pred_boxes": outputs.proposal_coord_logits.sigmoid()},
+                          targets)
+        return sum(terms[k] * weight_dict[k] for k in terms if k in weight_dict)
 
 
 def dice_loss(inputs, targets, num_boxes):

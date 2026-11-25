@@ -1,4 +1,4 @@
-"""tools/p1_check.py (G0 of docs/project/ke-hoach-chay-25-11-2026.md): P1 speed and same outputs on a real checkpoint.
+"""tools/p1_check.py (G0 of docs/ai/planning/2026-11-25-ke-hoach-chay.md): P1 speed and same outputs on a real checkpoint.
 
 A tiny checkpoint and toy images stand in for r3_real and Val-A.
 """

@@ -419,3 +419,49 @@ def test_exp_fb_ft_per_query_prompt_flag_follows_the_environment(tmp_path):
 
     assert flags(base) == {'--per_query_prompt': '0', '--local_query': '1'}
     assert flags({**base, 'PER_QUERY_PROMPT': '1'}) == {'--per_query_prompt': '1', '--local_query': '0'}
+
+
+def test_exp_fb_ft_new_params_extra_adds_new_modules_to_the_lr_group():
+    """D2 (plan B/C1): module mới (B, C1) học với --lr như prompt private, không phải --lr_old."""
+    import subprocess
+
+    base = dict(REPO=str(REPO), FSA_HF='/fsa', SYNTH_ROOT='/synth', PREV_CKPT='/r2.pth', TRAIN_ROWS='/rows.json',
+                PATH='/usr/bin:/bin')
+    script = f'source {REPO}/configs/exp/native/EXP-FB-FT.sh; printf "%s\\0" "${{ARGS[@]}}"'
+
+    def new_params(env):
+        out = subprocess.run(['bash', '-ec', script], env=env, capture_output=True, text=True,
+                             check=True).stdout.split('\0')[:-1]
+        return [out[i + 1] for i, flag in enumerate(out[:-1]) if flag == '--new_params'][-1]
+
+    assert new_params(base) == 'class_embed,prompts.private'
+    assert new_params({**base, 'NEW_PARAMS_EXTRA': 'prompts.xattn'}) == 'class_embed,prompts.private,prompts.xattn'
+
+
+def test_recipe_environment_carries_new_params_extra():
+    assert um._new_params_extra(um.VARIANTS['r4']) == ''
+    assert um._new_params_extra({**um.VARIANTS['r4'], 'new_params_extra': 'proposals'}) == 'proposals'
+
+
+@pytest.mark.parametrize('tag, per_query', [('pqx', 1), ('x', 0)])
+def test_round4_b_tags_add_the_cross_attention_correction(tag, per_query):
+    """B (plan B/C1): _r4_pqx = A + B (E2), _r4_x = chỉ B (E3); module mới học với --lr (D2)."""
+    name = f'al_margin_k_B500_r4_{tag}'
+    assert um._kind(name) == f'r4_{tag}'
+    recipe = um.VARIANTS[f'r4_{tag}']
+    assert recipe == {**um.VARIANTS['r4'], 'per_query_prompt': per_query, 'prompt_cross_attn': 1,
+                      'new_params_extra': 'prompts.xattn'}
+    assert um._new_params_extra(recipe) == 'prompts.xattn' and um._prompt_cross_attn(recipe) == 1
+    assert um.data_variant(name) == 'al_margin_k_B500_r4'
+    assert um.GATES[f'r4_{tag}'] == um.GATES['r4']
+
+
+@pytest.mark.parametrize('tag, cross, extra', [('pqc', 0, 'proposals'), ('pqxc', 1, 'prompts.xattn,proposals')])
+def test_round4_c1_tags_add_k_proposal_queries(tag, cross, extra):
+    """C1 (plan B/C1): _r4_pqc = A + C1 (E4), _r4_pqxc = A + B + C1 (E5); K = 100; module mới học với --lr."""
+    recipe = um.VARIANTS[f'r4_{tag}']
+    assert um._kind(f'al_margin_k_B500_r4_{tag}') == f'r4_{tag}'
+    assert recipe == {**um.VARIANTS['r4'], 'per_query_prompt': 1, 'prompt_cross_attn': cross, 'query_proposals': 100,
+                      'new_params_extra': extra}
+    assert um._query_proposals(recipe) == 100 and um._query_proposals(um.VARIANTS['r4']) == 0
+    assert um.data_variant(f'al_margin_k_B500_r4_{tag}') == 'al_margin_k_B500_r4'

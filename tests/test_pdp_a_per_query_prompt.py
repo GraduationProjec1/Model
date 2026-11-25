@@ -1,4 +1,4 @@
-"""A (docs/project/attention-prompt-plan-v2-2026-11-24.md): every object query picks its own prompt mixture.
+"""A (docs/ai/planning/2026-11-24-attention-prompt-plan-v2.md): every object query picks its own prompt mixture.
 
 With --per_query_prompt 1 the 300 queries of the prompt-free pass select prompts one by one, instead of one
 mixture for the whole image built by query_tf.

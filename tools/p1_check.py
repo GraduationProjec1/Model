@@ -1,4 +1,4 @@
-"""G0 (docs/project/ke-hoach-chay-25-11-2026.md): P1 (--reuse_features) on a real checkpoint, speed and same outputs.
+"""G0 (docs/ai/planning/2026-11-25-ke-hoach-chay.md): P1 (--reuse_features) on a real checkpoint, speed and same outputs.
 
 Port of docs/design/2026-11-22-toi-uu-2-luot/assets/speed_evidence.py (the CPU evidence on r4) with the checkpoint,
 images and device as arguments. Every image runs the old way (reuse off) and the new way (reuse on) back to back,

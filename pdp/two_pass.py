@@ -30,6 +30,8 @@ def prompted_outputs(model, pixel_values, pixel_mask, *, use_prompts, local_quer
     every_query = local_query or getattr(model.config, 'per_query_prompt', 0)
     query = first.last_hidden_state if every_query else first.last_hidden_state.mean(dim=1)
     second = {**shared, 'encoder_outputs': (first.encoder_last_hidden_state,)} if reuse_features else shared
+    if getattr(first, 'proposal_boxes', None) is not None:
+        second = {**second, 'proposals': first.proposal_boxes}  # C1: same extra queries, same order, in both passes
     return model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False,
                  **task_kwargs(second_task_id), **second)
 

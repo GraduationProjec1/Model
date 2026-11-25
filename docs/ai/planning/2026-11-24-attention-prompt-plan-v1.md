@@ -1,9 +1,9 @@
 # Kế hoạch: giảm nhầm mã (hướng A, B) và giảm sót vật (hướng C) cho PDP (24/11/2026)
 
-> **Đã thay bằng v2:** `attention-prompt-plan-v2-2026-11-24.md` (dựng trên nhánh `perf/two-pass-reuse`).
+> **Đã thay bằng v2:** `2026-11-24-attention-prompt-plan-v2.md` (dựng trên nhánh `perf/two-pass-reuse`).
 
 Trạng thái: **chờ duyệt**. Chưa sửa code.
-Tài liệu giải thích ý tưởng: `huong-A-B-giai-thich-2026-11-24.md`.
+Tài liệu giải thích ý tưởng: `2026-11-24-huong-A-B-giai-thich.md`.
 
 Quyết định của người dùng (24/11):
 1. Làm cả hai hướng: nhầm mã và sót vật.

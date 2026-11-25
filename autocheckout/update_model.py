@@ -63,7 +63,13 @@ SEED_TAGS = {'real_s1': ('real', 1)}
 VARIANTS.update({f'{R3_TAGS[data]}_s{seed}': {**VARIANTS[R3_TAGS[data]], 'seed': seed}
                  for data, seed in SEED_TAGS.values()})
 VARIANTS['r4'] = dict(VARIANTS['r3_strong'])
-R4_TAGS = {'pq': {'per_query_prompt': 1}}
+R4_TAGS = {'pq': {'per_query_prompt': 1},
+           'pqx': {'per_query_prompt': 1, 'prompt_cross_attn': 1, 'new_params_extra': 'prompts.xattn'},
+           'x': {'per_query_prompt': 0, 'prompt_cross_attn': 1, 'new_params_extra': 'prompts.xattn'},
+           'pqc': {'per_query_prompt': 1, 'prompt_cross_attn': 0, 'query_proposals': 100,
+                   'new_params_extra': 'proposals'},
+           'pqxc': {'per_query_prompt': 1, 'prompt_cross_attn': 1, 'query_proposals': 100,
+                    'new_params_extra': 'prompts.xattn,proposals'}}
 VARIANTS.update({f'r4_{tag}': {**VARIANTS['r4'], **recipe} for tag, recipe in R4_TAGS.items()})
 R4_FROM = 'real'
 TRAIN_SEED = 0
@@ -127,6 +133,19 @@ def _train_seed(hp: dict) -> int:
 
 def _per_query_prompt(hp: dict) -> int:
     return int(hp.get('per_query_prompt', 0))
+
+
+def _prompt_cross_attn(hp: dict) -> int:
+    return int(hp.get('prompt_cross_attn', 0))
+
+
+def _query_proposals(hp: dict) -> int:
+    return int(hp.get('query_proposals', 0))
+
+
+def _new_params_extra(hp: dict) -> str:
+    """D2 (plan B/C1): names of new modules trained at --lr (B: prompts.xattn, C1: proposals)."""
+    return hp.get('new_params_extra', '')
 
 
 def data_variant(name: str) -> str:
@@ -446,7 +465,8 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
                                TRAIN_ROWS=task_dir / 'train_rows.json', LR=hp['lr'], LR_OLD=hp['lr_old'],
                                LR_DROP=hp['lr_drop'], AUGMENT=hp.get('augment', 0),
                                TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp),
-                               PER_QUERY_PROMPT=_per_query_prompt(hp))
+                               PER_QUERY_PROMPT=_per_query_prompt(hp), NEW_PARAMS_EXTRA=_new_params_extra(hp),
+                               PROMPT_XATTN=_prompt_cross_attn(hp), QUERY_PROPOSALS=_query_proposals(hp))
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']

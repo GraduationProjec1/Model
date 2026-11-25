@@ -167,6 +167,14 @@ def get_args_parser():
                         help='Flag to enable localalized query')
     parser.add_argument('--per_query_prompt', default=0, type=int,
                         help='A: every object query selects its own prompt mixture (no query_tf); needs --local_query 0')
+    parser.add_argument('--prompt_cross_attn', default=0, type=int,
+                        help='B: the prompt of each query corrects the offsets and weights of the decoder cross-attention')
+    parser.add_argument('--xattn_alpha_max', default=0.5, type=float,
+                        help='B: bound of the scale alpha = xattn_alpha_max * tanh(beta) of that correction')
+    parser.add_argument('--query_proposals', default=0, type=int,
+                        help='C1: K extra object queries from the top-K encoder proposals (needs --local_query 0)')
+    parser.add_argument('--lambda_prop', default=1.0, type=float,
+                        help='C1: weight of the auxiliary loss of the proposal head')
     parser.add_argument('--start_task', default=1, type=int, 
                         help='Task to start training from in continual learning')
     parser.add_argument('--task_id', default=0, type=int, 

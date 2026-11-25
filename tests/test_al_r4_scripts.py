@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from conftest import REPO_ROOT
 
 R3_REAL, R3_ALL = 'al_margin_k_B500_r3_real', 'al_margin_k_B500_r3_all'
@@ -238,3 +239,13 @@ def test_attn_e1_stops_before_any_gpu_work_when_an_input_is_missing(tmp_path):
     calls = tmp_path / 'calls.txt'
     text = calls.read_text() if calls.exists() else ''
     assert 'tools.p1_check' not in text and 'run_al' not in text
+
+
+@pytest.mark.parametrize('task, variant', [('attn_e2', 'al_margin_k_B500_r4_pqx'), ('attn_e3', 'al_margin_k_B500_r4_x'),
+                                           ('attn_e4', 'al_margin_k_B500_r4_pqc'), ('attn_e5', 'al_margin_k_B500_r4_pqxc')])
+def test_attn_b_runs_train_their_own_variant(tmp_path, task, variant):
+    result, metadata = _vast(tmp_path, task)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _steps(tmp_path) == [f'run_al {variant} REUSE_FEATURES=1']
+    [breakdown] = _calls(tmp_path, 'tools.error_breakdown')
+    assert f'EXP-FB-FT-{variant}/task_5/pred_val.npz' in breakdown

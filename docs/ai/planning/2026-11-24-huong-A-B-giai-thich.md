@@ -1,7 +1,7 @@
 # Hướng A và hướng B: mục đích, ý tưởng, cách làm (24/11/2026)
 
 Tài liệu để **đọc và duyệt ý tưởng** trước khi lên plan triển khai. Chưa có dòng code nào bị sửa.
-Bản plan kỹ thuật nháp: `attention-prompt-plan-2026-11-24.md`. Plan đó sẽ được viết lại sau khi bạn duyệt tài liệu này.
+Bản plan kỹ thuật nháp: `2026-11-24-attention-prompt-plan-v1.md`. Plan đó sẽ được viết lại sau khi bạn duyệt tài liệu này.
 
 ---
 

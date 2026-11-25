@@ -26,6 +26,9 @@ class Prompt(nn.Module):
             raise ValueError('at least one prompt pool must be used')
         self.total_classes = sum(self.task_num_classes)
         self._init_smart(emb_d, prompt_param)
+        self.cross_attn = bool(getattr(args, 'prompt_cross_attn', False))
+        if self.cross_attn:
+            self._init_cross_attn(emb_d, args)
         self.pool_sizes = list(self.task_num_classes)
         if args.local_query:
             self.query_tf = nn.Sequential(
@@ -68,6 +71,43 @@ class Prompt(nn.Module):
         self.diversity_threshold = 0.2
         self.use_ddl_loss = False
         self.ddl_angle_threshold = 1.570796
+
+    def _init_cross_attn(self, emb_d, config):
+        """B: per decoder layer, W_off and W_att map the prompt of a query to corrections of the sampling offsets and
+        attention logits of the cross-attention. W = 0 keeps the outputs unchanged at the start; beta = 0.1 (not 0)
+        so that W gets a gradient from the first step."""
+        points = config.decoder_attention_heads * config.num_feature_levels * config.decoder_n_points
+        self.xattn_alpha_max = float(getattr(config, 'xattn_alpha_max', 0.5))
+        self.xattn_off = nn.ModuleList(nn.Linear(emb_d, points * 2) for _ in self.e_layers)
+        self.xattn_att = nn.ModuleList(nn.Linear(emb_d, points) for _ in self.e_layers)
+        self.xattn_beta = nn.Parameter(torch.empty(len(self.e_layers)))
+        self.reset_cross_attn()
+
+    @torch.no_grad()
+    def reset_cross_attn(self):
+        for layer in [*self.xattn_off, *self.xattn_att]:
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
+        self.xattn_beta.fill_(0.1)
+
+    def xattn_alpha(self):
+        return self.xattn_alpha_max * torch.tanh(self.xattn_beta)
+
+    @torch.no_grad()
+    def cross_attn_stats(self):
+        """B5: alpha and mean |W| of every layer (logged each epoch)."""
+        return {'alpha': [round(a, 5) for a in self.xattn_alpha().tolist()],
+                'w_off': [round(m.weight.abs().mean().item(), 6) for m in self.xattn_off],
+                'w_att': [round(m.weight.abs().mean().item(), 6) for m in self.xattn_att]}
+
+    def cross_deltas(self, Ek, Ev, l):
+        """B: (alpha * W_off(p), alpha * W_att(p)) of layer l, p the mean prompt token of each query ([B, Q, D]) or of
+        the image ([B, D], broadcast over the queries)."""
+        p = torch.cat((Ek, Ev), dim=-2).mean(dim=-2)
+        if p.dim() == 2:
+            p = p.unsqueeze(1)
+        alpha = self.xattn_alpha()[l]
+        return alpha * self.xattn_off[l](p), alpha * self.xattn_att[l](p)
 
     def ddl_loss(self, pa, pb, threshold):
 

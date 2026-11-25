@@ -1,8 +1,8 @@
 # Plan v2: giảm nhầm mã (A, B), giảm sót vật (C) trên nền tối ưu chi phí P1/P2 (24/11/2026)
 
 Trạng thái: **đã duyệt 24/11** (người dùng: "yes"). Code làm trên nhánh `feat/attn-prompt` tách từ `perf/two-pass-reuse` @ `4df908d`, trong worktree `AutoCheckout-CL-perf`.
-Thay thế: `attention-prompt-plan-2026-11-24.md` (v1).
-Tài liệu ý tưởng: `huong-A-B-giai-thich-2026-11-24.md`.
+Thay thế: `2026-11-24-attention-prompt-plan-v1.md` (v1).
+Tài liệu ý tưởng: `2026-11-24-huong-A-B-giai-thich.md`.
 Nguồn tối ưu chi phí: worktree `AutoCheckout-CL-perf`, nhánh `perf/two-pass-reuse` (`7630316` P1/P2 + `4df908d` xoá comment), và thiết kế `docs/design/2026-11-22-toi-uu-2-luot/` (ở thư mục gốc `Finalprpject`).
 
 Ký hiệu: **[PERF]** đánh dấu nội dung mới so với v1, lấy từ hoặc dựa trên `AutoCheckout-CL-perf`.
@@ -287,4 +287,4 @@ Bước 4 (code A) làm được song song với bước 5 (G0) vì không phụ
 | Test | `tests/test_pdp_a_per_query_prompt.py` (11 test) + 2 test config | A-T7 (IoU query giữa 2 lượt trên checkpoint r4) chưa làm: cần model thật, làm cùng G0 |
 | Smoke test A trên r4 thật (25/11) | `models/AL-margin-k-r4/task_final.pth`, bật per-query (bỏ `query_tf`), 10 ảnh Val-A, CPU, có P1: chạy không lỗi, logits hữu hạn, cùng kích thước. **4,38 giây/ảnh so với 4,48 của cách cũ**: A không làm chậm suy luận | Kiểm bằng script tạm `/tmp/a_smoke/run.py` (không đưa vào repo) |
 | **A-T7** (25/11) | 65 query tự tin (điểm > 0,3) trên 10 ảnh: IoU giữa box của cùng query ở lượt 1 và lượt 2, **trung vị 0,989, 100% ≥ 0,5** | Giả định "query q nhắm cùng vật ở hai lượt" đúng, nên chọn prompt bằng đầu ra lượt 1 là hợp lệ. Lưu ý: mới đo trên r4 (prompt học theo ảnh); trên model đã train per-query cần đo lại sau E1 |
-| Plan Q (`docs/ai/planning/2026-11-24-query-attention-plan.md`) | Người dùng đồng ý gộp: B và C1 giữ cách thí nghiệm rẻ (fine-tune từ r3_real), lấy các phát hiện của plan Q (`--new_params` không mở khóa; two-stage HF có sẵn nhưng cờ chưa vào config; cổng G0-SAM). Q1/Q2 bản đầy đủ (chạy lại FSA) để sau | Plan chi tiết B/C1: `plan-B-C1-2026-11-25.md` |
+| Plan Q (`docs/ai/planning/2026-11-24-query-attention-plan.md`) | Người dùng đồng ý gộp: B và C1 giữ cách thí nghiệm rẻ (fine-tune từ r3_real), lấy các phát hiện của plan Q (`--new_params` không mở khóa; two-stage HF có sẵn nhưng cờ chưa vào config; cổng G0-SAM). Q1/Q2 bản đầy đủ (chạy lại FSA) để sau | Plan chi tiết B/C1: `2026-11-25-plan-B-C1.md` |

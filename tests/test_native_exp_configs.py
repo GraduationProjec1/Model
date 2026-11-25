@@ -194,3 +194,15 @@ def test_native_common_per_query_prompt_turns_local_query_off():
     """A: query_tf and its loss L_Q only exist with --local_query 1, which --per_query_prompt 1 replaces."""
     args = native_common_args(PER_QUERY_PROMPT="1")
     assert args.per_query_prompt == 1 and args.local_query == 0
+
+
+def test_native_common_takes_prompt_cross_attn_from_the_environment(monkeypatch):
+    monkeypatch.delenv("PROMPT_XATTN", raising=False)
+    assert native_common_args().prompt_cross_attn == 0
+    assert native_common_args(PROMPT_XATTN="1").prompt_cross_attn == 1
+
+
+def test_native_common_takes_query_proposals_from_the_environment(monkeypatch):
+    monkeypatch.delenv("QUERY_PROPOSALS", raising=False)
+    assert native_common_args().query_proposals == 0
+    assert native_common_args(QUERY_PROPOSALS="100", PER_QUERY_PROMPT="1").query_proposals == 100

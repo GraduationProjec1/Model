@@ -26,6 +26,9 @@ def checkpoint_runtime(path):
     return torch.load(path, map_location="cpu").get("runtime")
 
 
+UPGRADES = ("per_query_prompt", "prompt_cross_attn", "query_proposals")
+
+
 def validate_runtime(args, runtime):
     if not runtime:
         return
@@ -40,25 +43,29 @@ def validate_runtime(args, runtime):
         or (longest is not None and longest != size["longest_edge"])
     ):
         raise ValueError("Requested resolution conflicts with checkpoint processor")
-    # A: a per-query run may start from an image-level checkpoint (its query_tf is dropped), not the reverse
-    to_per_query = getattr(args, "per_query_prompt", 0) and not config.get("per_query_prompt")
+    # A, B: a run may switch on a new module the checkpoint lacks (A drops query_tf, B starts at zero); not the
+    # reverse
+    upgrades = {f for f in UPGRADES if getattr(args, f, 0) and not config.get(f)}
+    skipped = upgrades | ({"local_query"} if "per_query_prompt" in upgrades else set())
     for arg, field in [
         ("n_classes", "num_labels"),
         ("use_prompts", "use_prompts"),
         ("local_query", "local_query"),
         ("per_query_prompt", "per_query_prompt"),
+        ("prompt_cross_attn", "prompt_cross_attn"),
+        ("query_proposals", "query_proposals"),
         ("num_prompts", "num_prompts"),
         ("prompt_len", "prompt_len"),
         ("use_shared", "use_shared_pool"),
         ("use_private", "use_private_pool"),
         ("task_num_classes", "task_num_classes"),
     ]:
-        if to_per_query and arg in ("local_query", "per_query_prompt"):
+        if arg in skipped:
             continue
         expected = (
             len(config["id2label"]) if field == "num_labels" else config.get(field)
         )
-        if expected is not None and getattr(args, arg, 0 if arg == "per_query_prompt" else None) != expected:
+        if expected is not None and getattr(args, arg, 0 if arg in UPGRADES else None) != expected:
             raise ValueError(f"Requested {arg} conflicts with checkpoint runtime")
 
 
@@ -222,7 +229,8 @@ def training_contract(args):
         "query_loss_grad",
     )
     result = {key: getattr(args, key) for key in keys}
-    for key, default in (("reuse_features", 0), ("cache_pseudo", "0"), ("per_query_prompt", 0)):
+    for key, default in (("reuse_features", 0), ("cache_pseudo", "0"), ("per_query_prompt", 0), ("prompt_cross_attn", 0), ("xattn_alpha_max", 0.5),
+                         ("query_proposals", 0), ("lambda_prop", 1.0)):
         if getattr(args, key, default) != default:
             result[key] = getattr(args, key)
     files = {"task_config": args.task_config}
