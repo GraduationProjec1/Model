@@ -24,3 +24,7 @@ lightning_logs/
 .idea/
 .vscode/
 .claude/
+
+# Planning notes and run notebooks stay local (may hold run details and credentials)
+/docs/ai/planning/*
+!/docs/ai/planning/README.md
