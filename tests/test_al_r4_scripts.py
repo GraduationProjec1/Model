@@ -167,7 +167,8 @@ exit 0
 """
 
 
-def _vast(tmp_path: Path, task: str = 'al_r4', skip: tuple = (), **extra: str) -> tuple[subprocess.CompletedProcess, Path]:
+def _vast(tmp_path: Path, task: str = 'al_r4', skip: tuple = (), files: tuple = (),
+          **extra: str) -> tuple[subprocess.CompletedProcess, Path]:
     repo = _repo(tmp_path, 'vast_train_and_sync.sh')
     (repo / 'scripts/run_al.sh').write_text(FAKE_RUN_AL)
     camp = repo / 'data/training/update-model/relearn-fix-v2'
@@ -182,6 +183,7 @@ def _vast(tmp_path: Path, task: str = 'al_r4', skip: tuple = (), **extra: str) -
                  camp / f'runs/EXP-FB-FT-{v}/task_5/pred_val.npz', camp / f'scored/{v}/calibration_count_m2.json',
                  camp / f'scored/{v}/calibration_count_groups.json']
     need += [data / 'eval/val_full.json', data / 'rpc/val2019/x.jpg']
+    need += [repo / f for f in files]
     for f in need:
         if f.name in skip:
             continue
@@ -249,3 +251,45 @@ def test_attn_b_runs_train_their_own_variant(tmp_path, task, variant):
     assert _steps(tmp_path) == [f'run_al {variant} REUSE_FEATURES=1']
     [breakdown] = _calls(tmp_path, 'tools.error_breakdown')
     assert f'EXP-FB-FT-{variant}/task_5/pred_val.npz' in breakdown
+
+
+R4_PQM = 'al_margin_k_B500_r4_pqm'
+R4_RUN = f'data/training/update-model/relearn-fix-v2/runs/EXP-FB-FT-{R4}/task_5'
+M6_FILES = (f'{R4_RUN}/task_final.pth', f'{R4_RUN}/run_info.json', '../data/eval/val_task_5.json')
+
+
+def test_attn_m1_checks_p1_then_trains_r4_pqm(tmp_path):
+    """M1 (plan M1/M6 §3.5): A + prototype margin loss, same steps as E1."""
+    result, metadata = _vast(tmp_path, 'attn_m1')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(_calls(tmp_path, 'tools.p1_check')) == 1
+    assert _steps(tmp_path) == [f'run_al {R4_PQM} REUSE_FEATURES=1']
+    [breakdown] = _calls(tmp_path, 'tools.error_breakdown')
+    assert f'EXP-FB-FT-{R4_PQM}/task_5/pred_val.npz' in breakdown
+
+
+def test_m6_res_predicts_r4_at_each_resolution_and_scores_it(tmp_path):
+    """M6 (plan M1/M6 §2.2): r4 predicted at 640, 800, 960 without training, each scored by al_score."""
+    result, metadata = _vast(tmp_path, 'm6_res', files=M6_FILES)
+    assert result.returncode == 0, result.stdout + result.stderr
+    predicts = _calls(tmp_path, 'tools.predict_resolution')
+    assert [p.split('--resolution ')[1].split()[0] for p in predicts] == ['640', '800', '960']
+    for line in predicts:
+        assert f'{R4_RUN}/task_final.pth' in line and f'{R4_RUN}/run_info.json' in line
+        assert '--ann-dir ' + str(tmp_path / 'data/eval') in line and '--img-root ' + str(tmp_path / 'data/rpc') in line
+    scores = _calls(tmp_path, 'tools.al_score')
+    assert [s.split('--name ')[1].split()[0] for s in scores] == ['m6_r4_res640', 'm6_r4_res800', 'm6_r4_res960']
+    assert 'runs/M6-r4-res800/task_5/pred_val.npz' in scores[1]
+    assert not _steps(tmp_path) and not _calls(tmp_path, 'tools.p1_check')
+    assert 'Exit Code: 0' in metadata.read_text()
+
+
+def test_m6_res_takes_the_resolutions_from_the_environment(tmp_path):
+    _vast(tmp_path, 'm6_res', files=M6_FILES, M6_RESOLUTIONS='800')
+    assert ['--resolution 800' in p for p in _calls(tmp_path, 'tools.predict_resolution')] == [True]
+
+
+def test_m6_res_stops_when_the_r4_run_is_missing(tmp_path):
+    result, _ = _vast(tmp_path, 'm6_res', files=M6_FILES[1:])
+    assert result.returncode == 3 and 'task_final.pth' in result.stdout
+    assert not _calls(tmp_path, 'tools.predict_resolution')

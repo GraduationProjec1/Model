@@ -22,6 +22,7 @@ from models.image_processing_deformable_detr import DeformableDetrImageProcessor
 from models.configuration_deformable_detr import DeformableDetrConfig
 from models.modeling_deformable_detr import DeformableDetrForObjectDetection
 from ppg import prototype_matrix, select_candidates, select_pseudo_labels
+import proto_margin
 from inference import predict_batch
 from two_pass import prompted_outputs
 from checkpointing import record_epoch
@@ -198,10 +199,40 @@ class local_trainer(pl.LightningModule):
 		self.__dict__['teacher'] = teacher
 		self.pseudo_cache = {}
 
+	def margin_anchors(self):
+		"""M1: anchors of the seen classes, fixed for the whole run (a snapshot: the prototypes that the last epoch
+		updates are not used), and the anchor row of each class."""
+		seen = self.seen_classes
+		if self.args.proto_anchor == 'class_embed':
+			rows = self.model.class_embed[-1].weight
+			vectors, valid = {c: rows[c] for c in range(seen)}, list(range(seen))
+		else:
+			vectors = self.class_prototypes
+			valid = [c for c in range(seen) if self.class_cache_count.get(c, 0) > 0]
+		if not valid:
+			raise ValueError('--proto_margin_lambda > 0 needs class prototypes in the checkpoint (none of the '
+							 f'{seen} seen classes has one); use --proto_anchor class_embed')
+		anchors, slot = proto_margin.anchor_matrix(vectors, valid, seen)
+		print(f'M1: {len(valid)}/{seen} classes anchored ({self.args.proto_anchor})', file=self.args.log_file)
+		return anchors.to(self.device), slot.to(self.device)
+
+	def prototype_margin_loss(self, outputs, labels):
+		"""M1: margin loss of the decoder output of the queries the matcher pairs with a ground truth."""
+		anchors, slot = self._margin_anchors
+		without_aux = {k: v for k, v in outputs.items() if k not in ('auxiliary_outputs', 'enc_outputs')}
+		with torch.no_grad():
+			indices = self.model.matcher(without_aux, labels)
+		features = torch.cat([outputs.last_hidden_state[b, q] for b, (q, _) in enumerate(indices)])
+		classes = torch.cat([labels[b]['class_labels'][t.to(labels[b]['class_labels'].device)]
+							 for b, (_, t) in enumerate(indices)])
+		return proto_margin.margin_loss(features, classes, anchors, slot, margin=self.args.proto_margin,
+										temp=self.args.proto_temp, topk=self.args.proto_topk)
+
 	def on_fit_start(self):
 		if self.teacher is not None:
 			self.teacher.to(self.device)
 		self._old_prototypes = None
+		self._margin_anchors = self.margin_anchors() if getattr(self.args, 'proto_margin_lambda', 0) > 0 else None
 		if self.frozen_rows is not None:
 			self._frozen_values = [(h.weight[self.frozen_rows.to(h.weight.device)].detach().clone(),
 									h.bias[self.frozen_rows.to(h.bias.device)].detach().clone())
@@ -572,6 +603,11 @@ class local_trainer(pl.LightningModule):
 			loss_dict['loss_ddl'] = ddl_loss
 			loss = loss + self.args.ddl_lambda * ddl_loss
 
+		if self.training and getattr(self.args, 'proto_margin_lambda', 0) > 0:
+			proto_loss = self.prototype_margin_loss(outputs, labels)
+			loss_dict['loss_proto'] = proto_loss
+			loss = loss + self.args.proto_margin_lambda * proto_loss
+
 		if self.training and old_model_outputs is not None and self.args.feature_kd > 0:
 			kd_loss = F.mse_loss(outputs.encoder_last_hidden_state, old_model_outputs.encoder_last_hidden_state)
 			loss_dict['loss_feature_kd'] = kd_loss
@@ -598,7 +634,7 @@ class local_trainer(pl.LightningModule):
 	
 	def training_step(self, batch, batch_idx):
 		loss, loss_dict = self.common_step(batch, batch_idx)
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD', 'loss_prop':'PROP'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD', 'loss_prop':'PROP', 'loss_proto':'PROTO'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)

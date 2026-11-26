@@ -23,7 +23,7 @@ ARGS=(
     --lr 0.0001 --lr_old 0.00001 --optim_groups prompt
     --use_prompts 1 --local_query "$(( ${PER_QUERY_PROMPT:-0} ? 0 : 1 ))" --num_prompts 100 --prompt_len 10
     --per_query_prompt "${PER_QUERY_PROMPT:-0}" --prompt_cross_attn "${PROMPT_XATTN:-0}"
-    --query_proposals "${QUERY_PROPOSALS:-0}"
+    --query_proposals "${QUERY_PROPOSALS:-0}" --proto_margin_lambda "${PROTO_MARGIN_LAMBDA:-0}"
     --lambda_query 0.1 --ddl_lambda 0.15 --query_loss_grad 1
     --freeze backbone,encoder,decoder --new_params class_embed,prompts
     --freeze_shared_after_task1 0 --pseudo_dedup_iou 0

@@ -1,0 +1,153 @@
+{
+ "checkpoint": "../models/AL-margin-k-r4/task_final.pth",
+ "images": 300,
+ "matched": 2985,
+ "coverage": {
+  "seen_classes": 200,
+  "classes_with_prototype": 200,
+  "empty": [],
+  "few": [],
+  "per_task": [
+   {
+    "task": 1,
+    "classes": 100,
+    "with_prototype": 100
+   },
+   {
+    "task": 2,
+    "classes": 25,
+    "with_prototype": 25
+   },
+   {
+    "task": 3,
+    "classes": 25,
+    "with_prototype": 25
+   },
+   {
+    "task": 4,
+    "classes": 25,
+    "with_prototype": 25
+   },
+   {
+    "task": 5,
+    "classes": 25,
+    "with_prototype": 25
+   }
+  ]
+ },
+ "acc_cls": 0.9762,
+ "acc_proto": 0.9296,
+ "acc_weight": 0.9692,
+ "proto_skipped": 0,
+ "margin_median_proto": 0.0765,
+ "margin_median_weight": 0.141,
+ "confused_pairs": {
+  "confusions": 71,
+  "cosine_median_confused": 0.7824,
+  "cosine_median_all_pairs": 0.5419
+ },
+ "closest_prototype_pairs": [
+  {
+   "a": 12,
+   "b": 102,
+   "cosine": 0.9311
+  },
+  {
+   "a": 12,
+   "b": 128,
+   "cosine": 0.9257
+  },
+  {
+   "a": 150,
+   "b": 175,
+   "cosine": 0.9255
+  },
+  {
+   "a": 13,
+   "b": 102,
+   "cosine": 0.9218
+  },
+  {
+   "a": 13,
+   "b": 128,
+   "cosine": 0.919
+  },
+  {
+   "a": 104,
+   "b": 150,
+   "cosine": 0.9173
+  },
+  {
+   "a": 102,
+   "b": 128,
+   "cosine": 0.9128
+  },
+  {
+   "a": 102,
+   "b": 151,
+   "cosine": 0.9108
+  },
+  {
+   "a": 104,
+   "b": 126,
+   "cosine": 0.9104
+  },
+  {
+   "a": 12,
+   "b": 178,
+   "cosine": 0.9079
+  },
+  {
+   "a": 162,
+   "b": 186,
+   "cosine": 0.9067
+  },
+  {
+   "a": 9,
+   "b": 151,
+   "cosine": 0.9055
+  },
+  {
+   "a": 102,
+   "b": 178,
+   "cosine": 0.904
+  },
+  {
+   "a": 1,
+   "b": 151,
+   "cosine": 0.9031
+  },
+  {
+   "a": 126,
+   "b": 150,
+   "cosine": 0.9013
+  },
+  {
+   "a": 13,
+   "b": 104,
+   "cosine": 0.8987
+  },
+  {
+   "a": 151,
+   "b": 177,
+   "cosine": 0.8911
+  },
+  {
+   "a": 21,
+   "b": 130,
+   "cosine": 0.8908
+  },
+  {
+   "a": 0,
+   "b": 126,
+   "cosine": 0.8869
+  },
+  {
+   "a": 10,
+   "b": 151,
+   "cosine": 0.8856
+  }
+ ],
+ "tol": 0.05,
+ "verdict": "prototype"
+}

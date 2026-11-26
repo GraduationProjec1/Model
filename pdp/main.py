@@ -222,6 +222,9 @@ def get_args_parser():
                         help='R1: minutes between resume checkpoints within an epoch (also saved every epoch)')
     parser.add_argument('--predict_only', default=0, type=int,
                         help='F9/V1: skip training, load task_<t>/task_final.pth and rewrite pred_{val,test}.npz')
+    parser.add_argument('--eval_resolution', default=0, type=int,
+                        help='M6: with --predict_only 1, predict at this image size (shortest = longest edge) '
+                             'instead of the size saved in the checkpoint; 0 = the saved size')
     parser.add_argument('--select_best_epoch', default=0, type=int,
                         help='FULL-SYN F0.4: after training, keep the epoch with the best val_task AP50 (FSA); '
                              'task_final.pth, hf_model and the predictions come from it')
@@ -294,6 +297,14 @@ def get_args_parser():
                         help='F13: focal-loss prior (p=0.01) for a classifier not loaded from the checkpoint')
     parser.add_argument('--proto_correct_only', default=1, type=int,
                         help='F7: prototypes only from queries whose predicted class is the GT class')
+    parser.add_argument('--proto_margin_lambda', default=0.0, type=float,
+                        help='M1: weight of the prototype margin loss on the matched queries; 0 = off')
+    parser.add_argument('--proto_margin', default=0.1, type=float, help='M1: cosine margin of the true class')
+    parser.add_argument('--proto_temp', default=0.1, type=float, help='M1: temperature of the margin loss')
+    parser.add_argument('--proto_topk', default=20, type=int, help='M1: hardest other classes in the loss')
+    parser.add_argument('--proto_anchor', default='prototype', choices=['prototype', 'class_embed'],
+                        help='M1: anchors fixed at fit start, the class prototypes of the checkpoint or the '
+                             'classifier rows (K0 verdict, tools/proto_check.py)')
     parser.add_argument('--shuffle', default=1, type=int,
                         help='F12: shuffle the training data every epoch')
     parser.add_argument('--require_kernel', default=0, type=int,
@@ -477,6 +488,8 @@ def run_task(args, task_id, output_root, processor=None):
 def main(args):
     if args.eval:
         raise SystemExit('--eval is replaced by --predict_only 1 (predictions are written after each task, F9)')
+    if args.eval_resolution and not args.predict_only:
+        raise SystemExit('--eval_resolution only changes predictions: use it with --predict_only 1 (M6)')
     splits = args.pred_splits.split(',')
     if not splits or len(set(splits)) != len(splits) or set(splits) - {'val', 'test'}:
         raise SystemExit(f'--pred_splits must list val and/or test once each, got {args.pred_splits!r}')

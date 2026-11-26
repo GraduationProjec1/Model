@@ -69,7 +69,8 @@ R4_TAGS = {'pq': {'per_query_prompt': 1},
            'pqc': {'per_query_prompt': 1, 'prompt_cross_attn': 0, 'query_proposals': 100,
                    'new_params_extra': 'proposals'},
            'pqxc': {'per_query_prompt': 1, 'prompt_cross_attn': 1, 'query_proposals': 100,
-                    'new_params_extra': 'prompts.xattn,proposals'}}
+                    'new_params_extra': 'prompts.xattn,proposals'},
+           'pqm': {'per_query_prompt': 1, 'proto_margin_lambda': 0.1}}
 VARIANTS.update({f'r4_{tag}': {**VARIANTS['r4'], **recipe} for tag, recipe in R4_TAGS.items()})
 R4_FROM = 'real'
 TRAIN_SEED = 0
@@ -141,6 +142,11 @@ def _prompt_cross_attn(hp: dict) -> int:
 
 def _query_proposals(hp: dict) -> int:
     return int(hp.get('query_proposals', 0))
+
+
+def _proto_margin_lambda(hp: dict) -> float:
+    """M1 (plan M1/M6): weight of the prototype margin loss, 0 = off."""
+    return float(hp.get('proto_margin_lambda', 0))
 
 
 def _new_params_extra(hp: dict) -> str:
@@ -466,7 +472,8 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
                                LR_DROP=hp['lr_drop'], AUGMENT=hp.get('augment', 0),
                                TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp),
                                PER_QUERY_PROMPT=_per_query_prompt(hp), NEW_PARAMS_EXTRA=_new_params_extra(hp),
-                               PROMPT_XATTN=_prompt_cross_attn(hp), QUERY_PROPOSALS=_query_proposals(hp))
+                               PROMPT_XATTN=_prompt_cross_attn(hp), QUERY_PROPOSALS=_query_proposals(hp),
+                               PROTO_MARGIN_LAMBDA=_proto_margin_lambda(hp))
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']

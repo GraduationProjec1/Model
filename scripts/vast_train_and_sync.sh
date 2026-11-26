@@ -246,10 +246,11 @@ case "$TASK" in
             step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
         fi
         ;;
-    attn_e1|attn_e2|attn_e3|attn_e4|attn_e5)
+    attn_e1|attn_e2|attn_e3|attn_e4|attn_e5|attn_m1)
         # docs/ai/planning/2026-11-25-ke-hoach-chay.md, 2026-11-25-plan-B-C1.md: G0 (P1 trên GPU) rồi một lượt r4 với
         # E1 = A (prompt theo từng query), E2 = A + B (prompt hiệu chỉnh cross-attn), E3 = chỉ B,
-        # E4 = A + C1 (K = 100 query đề xuất từ encoder), E5 = A + B + C1
+        # E4 = A + C1 (K = 100 query đề xuất từ encoder), E5 = A + B + C1;
+        # M1 = A + loss biên prototype (2026-11-26-plan-M1-M6-kiem-prototype.md §3)
         CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
         R3="$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r3_real/task_5/task_final.pth"
         case "$TASK" in
@@ -258,6 +259,7 @@ case "$TASK" in
             attn_e3) V=al_margin_k_B500_r4_x ;;
             attn_e4) V=al_margin_k_B500_r4_pqc ;;
             attn_e5) V=al_margin_k_B500_r4_pqxc ;;
+            attn_m1) V=al_margin_k_B500_r4_pqm ;;
         esac
         IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
         NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$CAMP/stages/al_margin_k_B500_r3_real.json" "$R3"
@@ -289,6 +291,24 @@ case "$TASK" in
             --pred "$CAMP/runs/EXP-FB-FT-$V/task_5/pred_val.npz" --policy "$DATA_DIR/relearn/active/scored/$V.json" \
             --task-config configs/relearn/task_config_relearn.json --rows "$CAMP/inputs/$V/train_rows.json" \
             --out "$REPO_DIR/data/training/update-model/error_breakdown_$V"
+        ;;
+    m6_res)
+        # 2026-11-26-plan-M1-M6-kiem-prototype.md §2.2: r4 dự đoán lại ở nhiều độ phân giải (không train), chấm từng cái
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        R4_RUN="${R4_RUN:-$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r4/task_5}"
+        IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
+        for f in "$R4_RUN/task_final.pth" "$R4_RUN/run_info.json" "$DATA_DIR/eval/val_full.json" \
+                 "$DATA_DIR/eval/val_task_5.json"; do
+            [[ -f "$f" ]] || { echo "[THIẾU] $f (r4: tải task_final.pth + run_info.json về \$R4_RUN)" | tee -a "$MAIN_LOG"; exit 3; }
+        done
+        for N in ${M6_RESOLUTIONS:-640 800 960}; do
+            OUT="$CAMP/runs/M6-r4-res$N"
+            echo ">> M6: r4 ở độ phân giải $N..." | tee -a "$MAIN_LOG"
+            step "M6_$N" python -m tools.predict_resolution --run-info "$R4_RUN/run_info.json" \
+                --checkpoint "$R4_RUN/task_final.pth" --resolution "$N" --out "$OUT" \
+                --ann-dir "$DATA_DIR/eval" --img-root "$IMG_ROOT"
+            step "M6_SCORE_$N" python -m tools.al_score --name "m6_r4_res$N" --pred "$OUT/task_5/pred_val.npz"
+        done
         ;;
     al_dot2)
         echo ">> Chạy Active Learning đợt 2 (B=250, 850 + entropy)..." | tee -a "$MAIN_LOG"

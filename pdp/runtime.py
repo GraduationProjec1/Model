@@ -37,7 +37,8 @@ def validate_runtime(args, runtime):
         raise ValueError("Requested backbone conflicts with checkpoint runtime")
     shortest = getattr(args, "image_size", None)
     longest = getattr(args, "max_image_size", None)
-    if (
+    # M6: --eval_resolution predicts at another size on purpose (main() allows it with --predict_only only)
+    if not getattr(args, "eval_resolution", 0) and (
         shortest is not None
         and shortest != size["shortest_edge"]
         or (longest is not None and longest != size["longest_edge"])
@@ -101,9 +102,13 @@ def processor(args, factory):
     if saved:
         from models.image_processing_deformable_detr import DeformableDetrImageProcessor
 
-        return DeformableDetrImageProcessor.from_dict(
+        result = DeformableDetrImageProcessor.from_dict(
             deepcopy(saved["processor_config"])
         )
+        resolution = getattr(args, "eval_resolution", 0)
+        if resolution:
+            result.size = {"shortest_edge": resolution, "longest_edge": resolution}
+        return result
     result = factory.from_pretrained(args.repo_name) if args.repo_name else factory()
     shortest, longest = getattr(args, "image_size", None), getattr(
         args, "max_image_size", None
@@ -230,7 +235,8 @@ def training_contract(args):
     )
     result = {key: getattr(args, key) for key in keys}
     for key, default in (("reuse_features", 0), ("cache_pseudo", "0"), ("per_query_prompt", 0), ("prompt_cross_attn", 0), ("xattn_alpha_max", 0.5),
-                         ("query_proposals", 0), ("lambda_prop", 1.0)):
+                         ("query_proposals", 0), ("lambda_prop", 1.0), ("proto_margin_lambda", 0.0),
+                         ("proto_margin", 0.1), ("proto_temp", 0.1), ("proto_topk", 20), ("proto_anchor", "prototype")):
         if getattr(args, key, default) != default:
             result[key] = getattr(args, key)
     files = {"task_config": args.task_config}
