@@ -19,6 +19,7 @@ R4_PQ = 'al_margin_k_B500_r4_pq'
 
 FAKE_PYTHON = r"""#!/bin/bash
 echo "$*" >> "$CALLS"
+[[ $1 == -c && -n ${FAIL_PY_C:-} ]] && exit 1
 [[ $1 == -m ]] || exit 0
 module=$2; shift 2
 stage=""; variant=""; name=""; test_pred=""
@@ -292,4 +293,46 @@ def test_m6_res_takes_the_resolutions_from_the_environment(tmp_path):
 def test_m6_res_stops_when_the_r4_run_is_missing(tmp_path):
     result, _ = _vast(tmp_path, 'm6_res', files=M6_FILES[1:])
     assert result.returncode == 3 and 'task_final.pth' in result.stdout
+    assert not _calls(tmp_path, 'tools.predict_resolution')
+
+
+N0_FILES = (*M6_FILES, '../data/relearn/active/scored/al_margin_k_B500_r4.json')
+
+
+@pytest.mark.parametrize('task, variants', [('n3_e', ['al_margin_k_B500_r4_g2', 'al_margin_k_B500_r4_g3']),
+                                            ('n2_e', ['al_margin_k_B500_r4_lkd'])])
+def test_n3_and_n2_train_their_variants_then_break_down_the_errors(tmp_path, task, variants):
+    """N3 (plan N1-N5 §4.4: w = 2 then 3) and N2 (§5.4: λ = 1) from r3_real like r4, same steps as E1."""
+    result, metadata = _vast(tmp_path, task)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(_calls(tmp_path, 'tools.p1_check')) == 1
+    assert _steps(tmp_path) == [f'run_al {v} REUSE_FEATURES=1' for v in variants]
+    breakdowns = _calls(tmp_path, 'tools.error_breakdown')
+    assert [f'EXP-FB-FT-{v}/task_5/pred_val.npz' in b for v, b in zip(variants, breakdowns, strict=True)] == \
+        [True] * len(variants)
+
+
+def test_n0_dump_predicts_r4_with_logits_checks_its_score_then_measures_n0_and_n1(tmp_path):
+    result, metadata = _vast(tmp_path, 'n0_dump', files=N0_FILES)
+    assert result.returncode == 0, result.stdout + result.stderr
+    [predict] = _calls(tmp_path, 'tools.predict_resolution')
+    assert '--resolution 0' in predict and '--dump-logits' in predict and f'{R4_RUN}/task_final.pth' in predict
+    [score] = _calls(tmp_path, 'tools.al_score')
+    assert '--name n0_r4_replay' in score and 'runs/N0-r4-logits/task_5/pred_val.npz' in score
+    [swap] = _calls(tmp_path, 'tools.swap_rank')
+    assert 'runs/N0-r4-logits/task_5/logits_val.npz' in swap and 'scored/al_margin_k_B500_r4.json' in swap
+    assert len(_calls(tmp_path, 'tools.task_calib_search')) == 1
+    assert not _steps(tmp_path) and 'Exit Code: 0' in metadata.read_text()
+
+
+def test_n0_dump_stops_before_n0_and_n1_when_the_replay_score_differs(tmp_path):
+    result, metadata = _vast(tmp_path, 'n0_dump', files=N0_FILES, FAIL_PY_C='1')
+    assert result.returncode != 0
+    assert not _calls(tmp_path, 'tools.swap_rank') and not _calls(tmp_path, 'tools.task_calib_search')
+    assert 'N0_CHECK' in metadata.read_text()
+
+
+def test_n0_dump_needs_the_r4_score(tmp_path):
+    result, _ = _vast(tmp_path, 'n0_dump', files=M6_FILES)
+    assert result.returncode == 3 and 'al_margin_k_B500_r4.json' in result.stdout
     assert not _calls(tmp_path, 'tools.predict_resolution')

@@ -200,11 +200,16 @@ def _case_environment(plan, experiment):
 
 
 def process_start(pid):
+    """Start time of process ``pid`` (None when it does not exist), to tell it from a later process with the same PID:
+    from /proc on Linux, from ``ps`` where there is no /proc (macOS)."""
     stat = Path(f'/proc/{pid}/stat')
     try:
         return stat.read_text().rsplit(')', 1)[1].split()[19]
     except FileNotFoundError:
-        return None
+        if Path('/proc/self').exists():
+            return None
+    result = subprocess.run(['ps', '-o', 'lstart=', '-p', str(int(pid))], capture_output=True, text=True)
+    return result.stdout.strip() or None
 
 
 def _run_logged(command, environment, log_path):

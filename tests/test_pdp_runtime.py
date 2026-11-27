@@ -187,3 +187,23 @@ def test_cli_resume_and_predict_rebuild_saved_architecture_without_source_weight
         np.testing.assert_allclose(
             getattr(actual, column), getattr(reference, column), rtol=1e-5, atol=1e-4
         )
+
+
+def test_a_run_may_switch_off_a_prompt_pool_of_the_checkpoint_but_not_on():
+    """B2 (EXP-FULL-SYN-NAIVE): task 2 trains without the private pool from a task-1 checkpoint that used it."""
+    from types import SimpleNamespace
+
+    import runtime
+
+    def saved(private):
+        return {"model_config": {"backbone": "r50", "id2label": {}, "use_shared_pool": 1, "use_private_pool": private},
+                "processor_config": {"size": {"shortest_edge": 640, "longest_edge": 640}}}
+
+    def args(private):
+        return SimpleNamespace(backbone="r50", image_size=640, max_image_size=640, n_classes=0, use_shared=1,
+                               use_private=private)
+
+    runtime.validate_runtime(args(0), saved(1))
+    runtime.validate_runtime(args(1), saved(1))
+    with pytest.raises(ValueError, match="use_private"):
+        runtime.validate_runtime(args(1), saved(0))

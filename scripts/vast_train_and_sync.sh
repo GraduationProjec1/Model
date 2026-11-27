@@ -246,20 +246,24 @@ case "$TASK" in
             step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
         fi
         ;;
-    attn_e1|attn_e2|attn_e3|attn_e4|attn_e5|attn_m1)
+    attn_e1|attn_e2|attn_e3|attn_e4|attn_e5|attn_m1|n3_e|n2_e)
         # docs/ai/planning/2026-11-25-ke-hoach-chay.md, 2026-11-25-plan-B-C1.md: G0 (P1 trên GPU) rồi một lượt r4 với
         # E1 = A (prompt theo từng query), E2 = A + B (prompt hiệu chỉnh cross-attn), E3 = chỉ B,
         # E4 = A + C1 (K = 100 query đề xuất từ encoder), E5 = A + B + C1;
-        # M1 = A + loss biên prototype (2026-11-26-plan-M1-M6-kiem-prototype.md §3)
+        # M1 = A + loss biên prototype (2026-11-26-plan-M1-M6-kiem-prototype.md §3);
+        # 2026-11-26-plan-N1-N5-hieu-chinh-task-va-loss.md: N3 = focal phạt lớp cùng nhóm, w = 2 rồi w = 3 (§4.4),
+        # N2 = chưng cất logit từ teacher, λ = 1 (§5.4); cả hai giữ cấu hình r4
         CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
         R3="$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r3_real/task_5/task_final.pth"
         case "$TASK" in
-            attn_e1) V=al_margin_k_B500_r4_pq ;;
-            attn_e2) V=al_margin_k_B500_r4_pqx ;;
-            attn_e3) V=al_margin_k_B500_r4_x ;;
-            attn_e4) V=al_margin_k_B500_r4_pqc ;;
-            attn_e5) V=al_margin_k_B500_r4_pqxc ;;
-            attn_m1) V=al_margin_k_B500_r4_pqm ;;
+            attn_e1) VS=al_margin_k_B500_r4_pq ;;
+            attn_e2) VS=al_margin_k_B500_r4_pqx ;;
+            attn_e3) VS=al_margin_k_B500_r4_x ;;
+            attn_e4) VS=al_margin_k_B500_r4_pqc ;;
+            attn_e5) VS=al_margin_k_B500_r4_pqxc ;;
+            attn_m1) VS=al_margin_k_B500_r4_pqm ;;
+            n3_e) VS="al_margin_k_B500_r4_g2 al_margin_k_B500_r4_g3" ;;
+            n2_e) VS=al_margin_k_B500_r4_lkd ;;
         esac
         IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
         NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$CAMP/stages/al_margin_k_B500_r3_real.json" "$R3"
@@ -284,13 +288,47 @@ case "$TASK" in
             REUSE=0
             echo "[CẢNH BÁO] G0 không đạt: ${TASK#attn_} chạy với REUSE_FEATURES=0" | tee -a "$MAIN_LOG"
         fi
-        echo ">> ${TASK#attn_}: $V (REUSE_FEATURES=$REUSE, ~2,5-3 giờ)..." | tee -a "$MAIN_LOG"
-        step "${TASK#attn_}" env REUSE_FEATURES="$REUSE" bash scripts/run_al.sh "$V"
-        echo ">> Phân rã lỗi của $V..." | tee -a "$MAIN_LOG"
-        step BREAKDOWN python -m tools.error_breakdown --val "$CAMP/inputs/val_b/val_full.json" \
-            --pred "$CAMP/runs/EXP-FB-FT-$V/task_5/pred_val.npz" --policy "$DATA_DIR/relearn/active/scored/$V.json" \
-            --task-config configs/relearn/task_config_relearn.json --rows "$CAMP/inputs/$V/train_rows.json" \
-            --out "$REPO_DIR/data/training/update-model/error_breakdown_$V"
+        for V in $VS; do
+            echo ">> ${TASK#attn_}: $V (REUSE_FEATURES=$REUSE, ~2,5-3 giờ)..." | tee -a "$MAIN_LOG"
+            step "${TASK#attn_}" env REUSE_FEATURES="$REUSE" bash scripts/run_al.sh "$V"
+            echo ">> Phân rã lỗi của $V..." | tee -a "$MAIN_LOG"
+            step BREAKDOWN python -m tools.error_breakdown --val "$CAMP/inputs/val_b/val_full.json" \
+                --pred "$CAMP/runs/EXP-FB-FT-$V/task_5/pred_val.npz" --policy "$DATA_DIR/relearn/active/scored/$V.json" \
+                --task-config configs/relearn/task_config_relearn.json --rows "$CAMP/inputs/$V/train_rows.json" \
+                --out "$REPO_DIR/data/training/update-model/error_breakdown_$V"
+        done
+        ;;
+    n0_dump)
+        # 2026-11-26-plan-N1-N5-hieu-chinh-task-va-loss.md §2.3: r4 dự đoán lại ở độ phân giải gốc kèm logit (không train),
+        # kiểm pred_val.npz cho đúng cAcc của r4 qua al_score; đúng thì đo N0 (swap_rank trên Val-A-calib) và N1
+        # (task_calib_search: fit trên calib, chấm Val-B một lần)
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        R4_RUN="${R4_RUN:-$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r4/task_5}"
+        SCORED="$DATA_DIR/relearn/active/scored"
+        IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
+        for f in "$R4_RUN/task_final.pth" "$R4_RUN/run_info.json" "$DATA_DIR/eval/val_full.json" \
+                 "$DATA_DIR/eval/val_task_5.json" "$SCORED/al_margin_k_B500_r4.json"; do
+            [[ -f "$f" ]] || { echo "[THIẾU] $f (r4: task_final.pth + run_info.json về \$R4_RUN, điểm r4 của al_score)" | tee -a "$MAIN_LOG"; exit 3; }
+        done
+        OUT="$CAMP/runs/N0-r4-logits"
+        echo ">> N0: r4 dự đoán lại kèm logit (~30-60 phút)..." | tee -a "$MAIN_LOG"
+        step N0_PREDICT python -m tools.predict_resolution --run-info "$R4_RUN/run_info.json" \
+            --checkpoint "$R4_RUN/task_final.pth" --resolution 0 --dump-logits --out "$OUT" \
+            --ann-dir "$DATA_DIR/eval" --img-root "$IMG_ROOT"
+        step N0_SCORE python -m tools.al_score --name n0_r4_replay --pred "$OUT/task_5/pred_val.npz"
+        step N0_CHECK python -c 'import json, sys
+a, b = (json.load(open(p))["cAcc_m2"] for p in sys.argv[1:])
+print(f"N0: cAcc lượt dump {a:.6f}, r4 {b:.6f}")
+sys.exit(abs(a - b) > 1e-9)' "$SCORED/n0_r4_replay.json" "$SCORED/al_margin_k_B500_r4.json"
+        if [[ " ${FAILED_STEPS[*]:-} " == *" N0_"* ]]; then
+            echo "[LỖI] N0: lượt dump không ra đúng cAcc của r4 -> dừng, không đo N0/N1" | tee -a "$MAIN_LOG"
+        else
+            mkdir -p "$REPO_DIR/data/training/update-model/n1_n5"
+            step N0_SWAP_RANK python -m tools.swap_rank --name r4 --logits "$OUT/task_5/logits_val.npz" \
+                --policy "$SCORED/al_margin_k_B500_r4.json" --out "$REPO_DIR/data/training/update-model/n1_n5/swap_rank_r4.json"
+            step N1_TASK_CALIB python -m tools.task_calib_search --name r4 --logits "$OUT/task_5/logits_val.npz" \
+                --out "$REPO_DIR/data/training/update-model/n1_n5/task_calib_r4.json"
+        fi
         ;;
     m6_res)
         # 2026-11-26-plan-M1-M6-kiem-prototype.md §2.2: r4 dự đoán lại ở nhiều độ phân giải (không train), chấm từng cái

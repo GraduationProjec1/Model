@@ -7,17 +7,19 @@ like the post-processing of the original evaluation (which masked unlearned logi
 unused last slot). Files follow docs/data_preprocessing/formats.md section 5.
 """
 
+import os
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from transformers.image_transforms import center_to_corners_format
 
 from autocheckout.io import md5_file
+from autocheckout.logit_dump import TOPK_PER_IMAGE, LogitDump, rank_topk, save_logits, top_queries
 from autocheckout.predictions import Predictions, save_predictions
+from autocheckout.task_calib import TaskCalib
 from datasets.coco_hug import CocoDetection
 from two_pass import prompted_outputs
-
-TOPK_PER_IMAGE = 100
 
 
 @torch.no_grad()
@@ -32,12 +34,17 @@ def predict_batch(
     seen_classes,
     topk=TOPK_PER_IMAGE,
     reuse_features=False,
+    task_calib=None,
+    return_logits=False,
 ):
     """Top-k (query, class) pairs of each image over classes < seen_classes.
 
     target_sizes: [B, 2] (height, width) the normalised boxes are scaled to.
     Returns one dict per image: scores, labels, queries, boxes (x1, y1, x2, y2 in pixels).
     reuse_features (P1): the second pass reuses the backbone and encoder of the first; same results.
+    task_calib (N1): a TaskCalib applied to the logits before the sigmoid (None = as before).
+    return_logits (N0): each dict also gets the raw logits and boxes of the topk most confident queries
+    (dump_queries, dump_logits, dump_boxes).
     """
     outputs = prompted_outputs(
         model,
@@ -48,24 +55,18 @@ def predict_batch(
         reuse_features=reuse_features,
     )
 
-    prob = outputs.logits[..., :seen_classes].sigmoid()
-    batch_size, num_queries, num_classes = prob.shape
-    scores, index = prob.reshape(batch_size, -1).topk(
-        min(topk, num_queries * num_classes), dim=1
-    )
-    queries = torch.div(index, num_classes, rounding_mode="floor")
-    labels = index % num_classes
-    boxes = center_to_corners_format(outputs.pred_boxes).gather(
-        1, queries.unsqueeze(-1).expand(-1, -1, 4)
-    )
+    raw = outputs.logits[..., :seen_classes]
+    logits = raw if task_calib is None else task_calib.apply(raw)
+    boxes = center_to_corners_format(outputs.pred_boxes)
     height, width = target_sizes.unbind(1)
     boxes = boxes * torch.stack([width, height, width, height], dim=1)[:, None, :].to(
         boxes.dtype
     )
-    return [
-        {"scores": s, "labels": l, "queries": q, "boxes": b}
-        for s, l, q, b in zip(scores, labels, queries, boxes)
-    ]
+    results = rank_topk(logits.sigmoid(), boxes, topk)
+    if return_logits:
+        for result, kept, image_logits, image_boxes in zip(results, top_queries(raw, topk), raw, boxes):
+            result.update(dump_queries=kept, dump_logits=image_logits[kept], dump_boxes=image_boxes[kept])
+    return results
 
 
 def predict_loader(
@@ -78,10 +79,15 @@ def predict_loader(
     seen_classes,
     meta=None,
     reuse_features=False,
+    task_calib=None,
+    dump_logits=False,
 ):
-    """Predictions of the model on every image of a dataloader of CocoDetection batches."""
+    """Predictions of the model on every image of a dataloader of CocoDetection batches.
+
+    dump_logits (N0): return (Predictions, LogitDump) instead of the Predictions alone."""
     model.eval()
     columns = {"image_id": [], "query": [], "label": [], "score": [], "boxes": []}
+    dump = {"image_id": [], "query": [], "logits": [], "boxes": []}
     for batch in dataloader:
         targets = batch["labels"]
         sizes = torch.stack([t["orig_size"] for t in targets]).to(device)
@@ -94,6 +100,8 @@ def predict_loader(
             local_query=local_query,
             seen_classes=seen_classes,
             reuse_features=reuse_features,
+            task_calib=task_calib,
+            return_logits=dump_logits,
         )
         for target, result in zip(targets, results):
             columns["image_id"].append(
@@ -103,6 +111,11 @@ def predict_loader(
             columns["label"].append(result["labels"].cpu().numpy())
             columns["score"].append(result["scores"].cpu().numpy())
             columns["boxes"].append(result["boxes"].cpu().numpy())
+            if dump_logits:
+                dump["image_id"].append(int(target["image_id"]))
+                dump["query"].append(result["dump_queries"].cpu().numpy())
+                dump["logits"].append(result["dump_logits"].cpu().numpy().astype(np.float16))
+                dump["boxes"].append(result["dump_boxes"].cpu().numpy())
     arrays = {
         name: (
             np.concatenate(parts)
@@ -111,13 +124,22 @@ def predict_loader(
         )
         for name, parts in columns.items()
     }
-    return Predictions(**arrays, meta=dict(meta or {}))
+    predictions = Predictions(**arrays, meta=dict(meta or {}))
+    if not dump_logits:
+        return predictions
+    logits = LogitDump(np.array(dump["image_id"], dtype=np.int64), np.stack(dump["query"]),
+                       np.stack(dump["logits"]), np.stack(dump["boxes"]),
+                       meta={**dict(meta or {}), "queries_per_image": TOPK_PER_IMAGE})
+    return predictions, logits
 
 
 def write_predictions(
     model, args, *, ann_file, out_file, task_id, seen_classes, split, processor, device
 ):
-    """Predict every image of a COCO file (e.g. val_full.json) and save pred_<split>.npz (V1)."""
+    """Predict every image of a COCO file (e.g. val_full.json) and save pred_<split>.npz (V1).
+
+    --task_calib (N1): the per-task logit calibration applied before the sigmoid, recorded in the meta;
+    --dump_logits 1 (N0): also save the raw logits as logits_<split>.npz next to out_file."""
     dataset = CocoDetection(
         img_folder=args.test_img_dir, ann_file=ann_file, processor=processor
     )
@@ -139,6 +161,11 @@ def write_predictions(
         "coordinates": "native_pixels",
         "backbone": model.config.backbone,
     }
+    task_calib = None
+    if getattr(args, "task_calib", ""):
+        task_calib = TaskCalib.load(args.task_calib)
+        meta["task_calib"] = {"file": str(args.task_calib), **task_calib.to_dict()}
+    dump_logits = bool(getattr(args, "dump_logits", 0))
     predictions = predict_loader(
         model,
         loader,
@@ -148,6 +175,11 @@ def write_predictions(
         seen_classes=seen_classes,
         meta=meta,
         reuse_features=bool(getattr(args, "reuse_features", 0)),
+        task_calib=task_calib,
+        dump_logits=dump_logits,
     )
+    if dump_logits:
+        predictions, logits = predictions
+        save_logits(os.path.join(os.path.dirname(out_file), f"logits_{split}.npz"), logits)
     save_predictions(out_file, predictions)
     return predictions

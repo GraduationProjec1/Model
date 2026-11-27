@@ -225,6 +225,12 @@ def get_args_parser():
     parser.add_argument('--eval_resolution', default=0, type=int,
                         help='M6: with --predict_only 1, predict at this image size (shortest = longest edge) '
                              'instead of the size saved in the checkpoint; 0 = the saved size')
+    parser.add_argument('--dump_logits', default=0, type=int,
+                        help='N0: with --predict_only 1, also save the raw logits of the 100 most confident queries '
+                             'of each image as logits_<split>.npz next to pred_<split>.npz')
+    parser.add_argument('--task_calib', default='', type=str,
+                        help='N1: with --predict_only 1, a per-task logit calibration (json of '
+                             'tools/task_calib_search.py) applied before the sigmoid; empty = none')
     parser.add_argument('--select_best_epoch', default=0, type=int,
                         help='FULL-SYN F0.4: after training, keep the epoch with the best val_task AP50 (FSA); '
                              'task_final.pth, hf_model and the predictions come from it')
@@ -245,7 +251,7 @@ def get_args_parser():
                              '(and the teacher); in eval also reuse the encoder output. Same results; 0 = as before')
     parser.add_argument('--cache_pseudo', default='0', choices=['0', '1', 'auto'],
                         help='P2: cache the teacher pseudo-labels of each image (batches without padding) for the '
-                             'later epochs of a task. auto = on unless --augment, --feature_kd or --ppg_legacy; '
+                             'later epochs of a task. auto = on unless --augment, --feature_kd, --logit_kd or --ppg_legacy; '
                              '1 = on, error with those flags; 0 = as before')
     parser.add_argument('--pseudo', default='ppg', choices=['ppg', 'threshold', 'none'],
                         help='Pseudo-labels of earlier classes: PPG (paper), fixed threshold only, or none')
@@ -276,6 +282,16 @@ def get_args_parser():
     parser.add_argument('--feature_kd', default=0.0, type=float,
                         help='M5: weight of the MSE between the encoder output of the model and of the teacher '
                              '(previous task) on the same images, from task 2 on (0 = off)')
+    parser.add_argument('--logit_kd', default=0.0, type=float,
+                        help='N2: weight of the BCE between the student logits and the teacher scores (earlier classes) '
+                             'of the queries the teacher is confident about, from task 2 on (0 = off)')
+    parser.add_argument('--logit_kd_box', default=0.0, type=float,
+                        help='N2: weight of the L1 between the student and teacher boxes of those queries (0 = off)')
+    parser.add_argument('--logit_kd_topk', default=10, type=int,
+                        help='N2: at most this many queries per image (above mean + std of the teacher scores)')
+    parser.add_argument('--group_neg_weight', default=1.0, type=float,
+                        help='N3: focal-loss weight (>= 1) of the negative logits of a matched query on the classes '
+                             'that share the supercategory of its target (--task_config); 1 = off')
     parser.add_argument('--optim_groups', default='auto', choices=['auto', 'prompt', 'detr'],
                         help="B1: 'detr' = full fine-tuning learning rates; 'auto' = original rule")
     parser.add_argument('--joint', default=0, type=int,
@@ -490,6 +506,12 @@ def main(args):
         raise SystemExit('--eval is replaced by --predict_only 1 (predictions are written after each task, F9)')
     if args.eval_resolution and not args.predict_only:
         raise SystemExit('--eval_resolution only changes predictions: use it with --predict_only 1 (M6)')
+    if args.dump_logits and not args.predict_only:
+        raise SystemExit('--dump_logits only writes predictions: use it with --predict_only 1 (N0)')
+    if args.task_calib and not args.predict_only:
+        raise SystemExit('--task_calib only changes predictions: use it with --predict_only 1 (N1)')
+    if args.task_calib and not os.path.isfile(args.task_calib):
+        raise SystemExit(f'--task_calib {args.task_calib}: no such file')
     splits = args.pred_splits.split(',')
     if not splits or len(set(splits)) != len(splits) or set(splits) - {'val', 'test'}:
         raise SystemExit(f'--pred_splits must list val and/or test once each, got {args.pred_splits!r}')

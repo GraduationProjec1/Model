@@ -27,6 +27,7 @@ def checkpoint_runtime(path):
 
 
 UPGRADES = ("per_query_prompt", "prompt_cross_attn", "query_proposals")
+POOLS = (("use_shared", "use_shared_pool"), ("use_private", "use_private_pool"))
 
 
 def validate_runtime(args, runtime):
@@ -48,6 +49,9 @@ def validate_runtime(args, runtime):
     # reverse
     upgrades = {f for f in UPGRADES if getattr(args, f, 0) and not config.get(f)}
     skipped = upgrades | ({"local_query"} if "per_query_prompt" in upgrades else set())
+    # B2 (EXP-FULL-SYN-NAIVE): a run may switch off a prompt pool the checkpoint used (its prompts stay in the state,
+    # unused); not the reverse
+    skipped |= {arg for arg, field in POOLS if not getattr(args, arg, 1) and config.get(field)}
     for arg, field in [
         ("n_classes", "num_labels"),
         ("use_prompts", "use_prompts"),
@@ -236,7 +240,9 @@ def training_contract(args):
     result = {key: getattr(args, key) for key in keys}
     for key, default in (("reuse_features", 0), ("cache_pseudo", "0"), ("per_query_prompt", 0), ("prompt_cross_attn", 0), ("xattn_alpha_max", 0.5),
                          ("query_proposals", 0), ("lambda_prop", 1.0), ("proto_margin_lambda", 0.0),
-                         ("proto_margin", 0.1), ("proto_temp", 0.1), ("proto_topk", 20), ("proto_anchor", "prototype")):
+                         ("proto_margin", 0.1), ("proto_temp", 0.1), ("proto_topk", 20), ("proto_anchor", "prototype"),
+                         ("group_neg_weight", 1.0), ("logit_kd", 0.0), ("logit_kd_box", 0.0),
+                         ("logit_kd_topk", 10)):
         if getattr(args, key, default) != default:
             result[key] = getattr(args, key)
     files = {"task_config": args.task_config}

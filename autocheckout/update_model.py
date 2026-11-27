@@ -70,7 +70,9 @@ R4_TAGS = {'pq': {'per_query_prompt': 1},
                    'new_params_extra': 'proposals'},
            'pqxc': {'per_query_prompt': 1, 'prompt_cross_attn': 1, 'query_proposals': 100,
                     'new_params_extra': 'prompts.xattn,proposals'},
-           'pqm': {'per_query_prompt': 1, 'proto_margin_lambda': 0.1}}
+           'pqm': {'per_query_prompt': 1, 'proto_margin_lambda': 0.1},
+           'g2': {'group_neg_weight': 2.0}, 'g3': {'group_neg_weight': 3.0},
+           'lkd': {'logit_kd': 1.0}}
 VARIANTS.update({f'r4_{tag}': {**VARIANTS['r4'], **recipe} for tag, recipe in R4_TAGS.items()})
 R4_FROM = 'real'
 TRAIN_SEED = 0
@@ -147,6 +149,16 @@ def _query_proposals(hp: dict) -> int:
 def _proto_margin_lambda(hp: dict) -> float:
     """M1 (plan M1/M6): weight of the prototype margin loss, 0 = off."""
     return float(hp.get('proto_margin_lambda', 0))
+
+
+def _group_neg_weight(hp: dict) -> float:
+    """N3 (plan N1-N5 §4): focal weight of the same-supercategory negatives, 1 = off."""
+    return float(hp.get('group_neg_weight', 1.0))
+
+
+def _logit_kd(hp: dict) -> float:
+    """N2 (plan N1-N5 §5): weight of the logit distillation from the teacher, 0 = off."""
+    return float(hp.get('logit_kd', 0))
 
 
 def _new_params_extra(hp: dict) -> str:
@@ -473,7 +485,8 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
                                TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp),
                                PER_QUERY_PROMPT=_per_query_prompt(hp), NEW_PARAMS_EXTRA=_new_params_extra(hp),
                                PROMPT_XATTN=_prompt_cross_attn(hp), QUERY_PROPOSALS=_query_proposals(hp),
-                               PROTO_MARGIN_LAMBDA=_proto_margin_lambda(hp))
+                               PROTO_MARGIN_LAMBDA=_proto_margin_lambda(hp),
+                               GROUP_NEG_WEIGHT=_group_neg_weight(hp), LOGIT_KD=_logit_kd(hp))
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']

@@ -303,6 +303,13 @@ def _init_worker(out_root, render_kwargs):
     _WORKER.update(out_root=out_root, render_kwargs=render_kwargs)
 
 
+def _init_forked_worker(out_root, render_kwargs):
+    """A forked worker must not use the OpenCV thread pool of its parent (segfault on macOS); it renders one scene at
+    a time, single-threaded."""
+    cv2.setNumThreads(0)
+    _init_worker(out_root, render_kwargs)
+
+
 def _write_one(recipe):
     try:
         return recipe["image_id"], write_scene(recipe, _WORKER["out_root"], **_WORKER["render_kwargs"])["sha256"], None
@@ -324,7 +331,8 @@ def generate(recipes: list[dict[str, Any]], out_root: str | os.PathLike, *, work
         import multiprocessing
         from concurrent.futures import ProcessPoolExecutor
 
-        pool = ProcessPoolExecutor(workers, multiprocessing.get_context("fork"), _init_worker, (out_root, render_kwargs))
+        pool = ProcessPoolExecutor(workers, multiprocessing.get_context("fork"), _init_forked_worker,
+                                   (out_root, render_kwargs))
         results = pool.map(_write_one, recipes, chunksize=8)
     try:
         for done, (image_id, sha, error) in enumerate(results, start=1):

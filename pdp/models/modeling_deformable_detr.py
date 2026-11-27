@@ -1893,6 +1893,9 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             print("Invalid class rangw: " + str(self.invalid_cls_logits), file=log_file)
         else:
             self.invalid_cls_logits = None
+        # N3: [num_labels, num_labels] bool, True where two classes share a supercategory (set by the trainer)
+        self.same_group = None
+        self.group_neg_weight = 1.0
         
         self.class_embed = nn.Linear(config.d_model, config.num_labels)
         self.bbox_embed = DeformableDetrMLPPredictionHead(
@@ -2049,7 +2052,9 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
                 num_classes=self.config.num_labels,
                 focal_alpha=self.config.focal_alpha,
                 losses=losses,
-                invalid_cls_logits=self.invalid_cls_logits
+                invalid_cls_logits=self.invalid_cls_logits,
+                same_group=self.same_group,
+                group_neg_weight=self.group_neg_weight,
             )
             criterion.to(self.device)
             outputs_loss = {}
@@ -2137,7 +2142,7 @@ def dice_loss(inputs, targets, num_boxes):
     return loss.sum() / num_boxes
 
 
-def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
+def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2, weight=None):
     """
     Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
 
@@ -2151,6 +2156,8 @@ def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: f
             Optional weighting factor in the range (0,1) to balance positive vs. negative examples.
         gamma (`int`, *optional*, defaults to `2`):
             Exponent of the modulating factor (1 - p_t) to balance easy vs hard examples.
+        weight (`torch.FloatTensor` of the shape of `inputs`, *optional*):
+            N3: per-element weight of the loss, applied before the reduction (None = unweighted).
 
     Returns:
         Loss tensor
@@ -2163,6 +2170,8 @@ def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: f
     if alpha >= 0:
         alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
         loss = alpha_t * loss
+    if weight is not None:
+        loss = loss * weight
     return loss.mean(1).sum() / num_boxes
 
 
@@ -2183,13 +2192,27 @@ class DeformableDetrLoss(nn.Module):
             List of all the losses to be applied. See `get_loss` for a list of all available losses.
     """
 
-    def __init__(self, matcher, num_classes, focal_alpha, losses, invalid_cls_logits):
+    def __init__(self, matcher, num_classes, focal_alpha, losses, invalid_cls_logits, same_group=None,
+                 group_neg_weight=1.0):
         super().__init__()
         self.matcher = matcher
         self.num_classes = num_classes
         self.focal_alpha = focal_alpha
         self.losses = losses
         self.invalid_cls_logits = invalid_cls_logits
+        self.same_group = same_group
+        self.group_neg_weight = group_neg_weight
+
+    def group_weight(self, source_logits, idx, target_classes_o):
+        """N3: weight group_neg_weight on the negative logits of a matched query whose class shares the supercategory
+        of its target class (never the target itself); 1 elsewhere, background queries included. None when off."""
+        if self.same_group is None or self.group_neg_weight == 1.0 or len(target_classes_o) == 0:
+            return None
+        same = self.same_group.to(source_logits.device)[target_classes_o][:, :source_logits.shape[2]]
+        weight = torch.ones_like(source_logits)
+        weight[idx] = 1 + (self.group_neg_weight - 1) * same.to(source_logits.dtype)
+        weight[idx[0], idx[1], target_classes_o] = 1
+        return weight
 
     def loss_labels(self, outputs, targets, indices, num_boxes):
         """
@@ -2222,7 +2245,8 @@ class DeformableDetrLoss(nn.Module):
 
         target_classes_onehot = target_classes_onehot[:, :, :-1]
         loss_ce = (
-            sigmoid_focal_loss(source_logits, target_classes_onehot, num_boxes, alpha=self.focal_alpha, gamma=2)
+            sigmoid_focal_loss(source_logits, target_classes_onehot, num_boxes, alpha=self.focal_alpha, gamma=2,
+                               weight=self.group_weight(source_logits, idx, target_classes_o))
             * source_logits.shape[1]
         )
         losses = {"loss_ce": loss_ce}

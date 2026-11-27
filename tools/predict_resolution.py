@@ -7,6 +7,9 @@ tools.al_score like any run.
 
     python -m tools.predict_resolution --run-info <run>/task_5/run_info.json --checkpoint <run>/task_5/task_final.pth \\
         --resolution 800 --out <runs>/M6-r4-res800 [--ann-dir <data>/eval --img-root <data>/rpc]
+
+N0/N1 (docs/ai/planning/2026-11-26-plan-N1-N5-hieu-chinh-task-va-loss.md): ``--resolution 0`` keeps the saved size,
+``--dump-logits`` also writes logits_val.npz, ``--task-calib <json>`` predicts with a per-task logit calibration.
 """
 
 from __future__ import annotations
@@ -23,11 +26,14 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-info", type=Path, required=True, help="run_info.json of the trained task")
     parser.add_argument("--checkpoint", type=Path, required=True, help="task_final.pth of that task")
-    parser.add_argument("--resolution", type=int, required=True, help="image size (shortest = longest edge)")
+    parser.add_argument("--resolution", type=int, required=True,
+                        help="image size (shortest = longest edge); 0 = the size saved in the checkpoint")
     parser.add_argument("--out", type=Path, required=True, help="output root; predictions in <out>/task_<t>/")
     parser.add_argument("--ann-dir", default="", help="folder of val_full.json and val_task_<t>.json "
                         "(default: the run's own)")
     parser.add_argument("--img-root", default="", help="image root of val_full.json (default: the run's own)")
+    parser.add_argument("--dump-logits", action="store_true", help="N0: also write logits_val.npz")
+    parser.add_argument("--task-calib", default="", help="N1: json of tools/task_calib_search.py")
     return parser.parse_args(argv)
 
 
@@ -57,6 +63,7 @@ def main(argv=None) -> Path:
     run.output_dir, run.start_task, run.n_tasks = str(args.out), task_id, task_id
     # predict only: nothing is trained, so the rows to retrain and the previous checkpoint of the run are not read
     run.predict_only, run.eval_resolution, run.pred_splits = 1, args.resolution, "val"
+    run.dump_logits, run.task_calib = int(args.dump_logits), str(args.task_calib)
     run.prev_ckpt, run.train_rows = "", ""
     if args.ann_dir:
         run.task_ann_dir = run.pred_ann_dir = args.ann_dir

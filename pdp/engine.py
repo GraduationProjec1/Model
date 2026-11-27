@@ -29,6 +29,7 @@ from checkpointing import record_epoch
 import runtime
 from autocheckout.io import save_json
 from autocheckout.model_acceptance import now
+from autocheckout.taskcfg import TaskConfig
 
 PRIOR_PROB = 0.01
 
@@ -62,17 +63,72 @@ def backbone_training_reason(model, args):
 
 def pseudo_cache_enabled(args):
 	"""P2: whether the teacher pseudo-labels are cached by image_id (--cache_pseudo). They only repeat across epochs
-	when the image, the teacher and the targets do: not with --augment, nor with --feature_kd (which needs the
-	teacher's encoder output every step), nor with the original pseudo-labelling (--ppg_legacy)."""
+	when the image, the teacher and the targets do: not with --augment, nor with --feature_kd or --logit_kd (which need
+	the teacher's outputs every step), nor with the original pseudo-labelling (--ppg_legacy)."""
 	if args.cache_pseudo == '0':
 		return False
-	checks = (('--augment', args.augment), ('--feature_kd', args.feature_kd > 0), ('--ppg_legacy', args.ppg_legacy))
+	checks = (('--augment', args.augment), ('--feature_kd', args.feature_kd > 0), ('--ppg_legacy', args.ppg_legacy),
+			  ('--logit_kd', getattr(args, 'logit_kd', 0) > 0))
 	blockers = [flag for flag, on in checks if on]
 	if blockers and args.cache_pseudo == '1':
 		raise ValueError(f'--cache_pseudo 1 cannot be used with {", ".join(blockers)}; use auto or 0')
 	state = f'off ({", ".join(blockers)})' if blockers else 'on'
 	print(f'P2: pseudo-label cache {state} (--cache_pseudo {args.cache_pseudo})', file=args.log_file)
 	return not blockers
+
+
+def validate_logit_kd(args):
+	"""N2: --logit_kd and --logit_kd_box are weights (>= 0), --logit_kd_topk at least one query."""
+	if getattr(args, 'logit_kd', 0) < 0 or getattr(args, 'logit_kd_box', 0) < 0:
+		raise ValueError('--logit_kd and --logit_kd_box must be >= 0')
+	if getattr(args, 'logit_kd_topk', 10) < 1:
+		raise ValueError(f'--logit_kd_topk must be >= 1, got {args.logit_kd_topk}')
+
+
+def select_kd_queries(teacher_logits, seen_old, topk):
+	"""N2 (ERD): [B, Q] bool, the queries whose best earlier-class teacher score is above mean + std of the image,
+	at most topk per image (the most confident)."""
+	best = teacher_logits[..., :seen_old].sigmoid().max(dim=-1).values
+	above = best > best.mean(dim=1, keepdim=True) + best.std(dim=1, keepdim=True)
+	top = torch.zeros_like(above)
+	top.scatter_(1, best.topk(min(topk, best.shape[1]), dim=1).indices, True)
+	return above & top
+
+
+def logit_kd_loss(student_logits, teacher_logits, mask, seen_old):
+	"""N2: BCE of the student logits of the selected queries against the teacher scores, earlier classes only,
+	averaged over the selected queries and classes (0 when none is selected)."""
+	if not mask.any():
+		return student_logits.sum() * 0
+	return F.binary_cross_entropy_with_logits(student_logits[mask][:, :seen_old],
+											  teacher_logits[mask][:, :seen_old].sigmoid())
+
+
+def box_kd_loss(student_boxes, teacher_boxes, mask):
+	"""N2: L1 between the student and teacher boxes of the selected queries (0 when none is selected)."""
+	if not mask.any():
+		return student_boxes.sum() * 0
+	return F.l1_loss(student_boxes[mask], teacher_boxes[mask])
+
+
+def same_group_matrix(args):
+	"""N3 (--group_neg_weight): [n_classes, n_classes] bool, True where two different classes share a supercategory
+	in --task_config (classes without one are in no group); None when the flag is off (1.0)."""
+	weight = getattr(args, 'group_neg_weight', 1.0)
+	if weight < 1:
+		raise ValueError(f'--group_neg_weight must be >= 1 (1 = off), got {weight}')
+	if weight == 1:
+		return None
+	if not args.task_config:
+		raise ValueError('--group_neg_weight needs --task_config (the supercategory of each class)')
+	cfg = TaskConfig.load(args.task_config)
+	names = [None] * args.n_classes
+	for task in cfg.tasks:
+		for c in task.classes:
+			names[c.label] = c.supercategory
+	same = torch.tensor([[a is not None and a == b for b in names] for a in names], dtype=torch.bool)
+	same.fill_diagonal_(False)
+	return same
 
 
 def frozen_row_mask(train_rows, n_classes, seen_classes):
@@ -114,6 +170,7 @@ class local_trainer(pl.LightningModule):
 		seen_classes = detr_config.PREV_INTRODUCED_CLS + detr_config.CUR_INTRODUCED_CLS
 		self.__dict__['teacher'] = None
 		self._old_prototypes = None
+		validate_logit_kd(args)
 		self.use_pseudo_cache = pseudo_cache_enabled(args)
 		self.pseudo_cache = {}
 		self.pseudo_cache_hits = 0
@@ -136,6 +193,8 @@ class local_trainer(pl.LightningModule):
 		self.seen_classes = seen_classes
 
 		self.model, self.loading_report = runtime.build_model(args, detr_config, DeformableDetrForObjectDetection)
+		self.model.same_group = same_group_matrix(args)
+		self.model.group_neg_weight = getattr(args, 'group_neg_weight', 1.0)
 		self.processor = getattr(args, '_processor', None) or runtime.processor(args, DeformableDetrImageProcessor)
 		self.runtime = runtime.runtime_record(args, self.model, self.processor)
 
@@ -613,6 +672,16 @@ class local_trainer(pl.LightningModule):
 			loss_dict['loss_feature_kd'] = kd_loss
 			loss = loss + self.args.feature_kd * kd_loss
 
+		if self.training and old_model_outputs is not None and getattr(self.args, 'logit_kd', 0) > 0:
+			mask = select_kd_queries(old_model_outputs.logits, self.PREV_INTRODUCED_CLS, self.args.logit_kd_topk)
+			logit_kd = logit_kd_loss(outputs.logits, old_model_outputs.logits, mask, self.PREV_INTRODUCED_CLS)
+			loss_dict['loss_logit_kd'] = logit_kd
+			loss = loss + self.args.logit_kd * logit_kd
+			if self.args.logit_kd_box > 0:
+				box_kd = box_kd_loss(outputs.pred_boxes, old_model_outputs.pred_boxes, mask)
+				loss_dict['loss_box_kd'] = box_kd
+				loss = loss + self.args.logit_kd_box * box_kd
+
 		if self.args.use_prompts and self.args.local_query:
 			loss_dict['query_loss'] = query_loss
 
@@ -634,7 +703,7 @@ class local_trainer(pl.LightningModule):
 	
 	def training_step(self, batch, batch_idx):
 		loss, loss_dict = self.common_step(batch, batch_idx)
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD', 'loss_prop':'PROP', 'loss_proto':'PROTO'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'loss_ddl':'DDL', 'loss_feature_kd':'FKD', 'loss_prop':'PROP', 'loss_proto':'PROTO', 'loss_logit_kd':'LKD', 'loss_box_kd':'BKD'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)
