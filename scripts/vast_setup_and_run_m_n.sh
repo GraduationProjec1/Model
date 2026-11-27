@@ -26,6 +26,7 @@ TASKS="${TASKS:-n0_dump m6_res attn_m1 n3_e n2_e}"
 
 AUTO_DESTROY="${AUTO_DESTROY:-0}"
 AUTO_STOP="${AUTO_STOP:-0}"
+SYNC_EVERY_MIN="${SYNC_EVERY_MIN:-0}"
 VAST_API_KEY="${VAST_API_KEY:-}"
 INSTANCE_ID="${INSTANCE_ID:-}"
 
@@ -162,8 +163,9 @@ for t in $TASKS; do
     echo "##########################################################"
     echo " [$(date '+%F %T')] BẮT ĐẦU TASK: $t"
     echo "##########################################################"
-    # Tắt AUTO_DESTROY/AUTO_STOP và ẩn VAST_API_KEY cho từng task con để máy không tắt giữa chuỗi
-    if AUTO_DESTROY=0 AUTO_STOP=0 VAST_API_KEY="" RCLONE_REMOTE="$RCLONE_REMOTE" \
+    # Tắt AUTO_DESTROY/AUTO_STOP và ẩn VAST_API_KEY cho từng task con để máy không tắt giữa chuỗi;
+    # SYNC_EVERY_MIN=0 (mặc định): chỉ đẩy kết quả lên Drive sau khi xong từng thí nghiệm
+    if AUTO_DESTROY=0 AUTO_STOP=0 VAST_API_KEY="" SYNC_EVERY_MIN="$SYNC_EVERY_MIN" RCLONE_REMOTE="$RCLONE_REMOTE" \
        bash "$REPO/scripts/vast_train_and_sync.sh" "$t"; then
         PASSED_TASKS+=("$t")
     else
