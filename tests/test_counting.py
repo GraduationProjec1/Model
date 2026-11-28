@@ -171,3 +171,18 @@ def test_class_group_scores_mccs_and_mccd_by_hand():
     assert scores["mCCD"] == pytest.approx(counting_scores(pred, gt)["mCCD"])
     assert (scores["K"], scores["K_eff"]) == (3, 2)
     assert np.isnan(class_group_scores(pred[:, 2:], gt[:, 2:])["mCCS"])
+
+
+def test_select_group_thresholds_robust_avoids_low_threshold_collapse():
+    from autocheckout.counting import select_group_thresholds, select_group_thresholds_robust
+
+    coco_gt, preds = _threshold_val_fixture()
+    # Grid [0.1, 0.25, 0.4, 0.6, 0.75]: thresholds 0.25..0.75 all give cAcc=1.0 on the fixture.
+    grid = [0.1, 0.25, 0.4, 0.6, 0.75]
+    small, _ = select_group_thresholds(coco_gt, preds, [[0]], thresholds=grid, tie_break="smallest")
+    mid, _ = select_group_thresholds(coco_gt, preds, [[0]], thresholds=grid, tie_break="midpoint")
+    rob, scores = select_group_thresholds_robust(coco_gt, preds, [[0]], thresholds=grid, folds=2, min_threshold=0.2)
+    assert small == [pytest.approx(0.25)]
+    assert mid[0] >= 0.4
+    assert rob[0] >= 0.4
+    assert scores["cAcc"] == pytest.approx(1.0)

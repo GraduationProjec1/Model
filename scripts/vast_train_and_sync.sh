@@ -291,6 +291,9 @@ case "$TASK" in
         for V in $VS; do
             echo ">> ${TASK#attn_}: $V (REUSE_FEATURES=$REUSE, ~2,5-3 giờ)..." | tee -a "$MAIN_LOG"
             step "${TASK#attn_}" env REUSE_FEATURES="$REUSE" bash scripts/run_al.sh "$V"
+            echo ">> Chấm bổ sung bằng ngưỡng robust-calib cho $V..." | tee -a "$MAIN_LOG"
+            step "${TASK#attn_}_ROBUST" python -m tools.al_score --name "${V}_robust" \
+                --pred "$CAMP/runs/EXP-FB-FT-$V/task_5/pred_val.npz" --robust-calib
             echo ">> Phân rã lỗi của $V..." | tee -a "$MAIN_LOG"
             step BREAKDOWN python -m tools.error_breakdown --val "$CAMP/inputs/val_b/val_full.json" \
                 --pred "$CAMP/runs/EXP-FB-FT-$V/task_5/pred_val.npz" --policy "$DATA_DIR/relearn/active/scored/$V.json" \
@@ -347,6 +350,22 @@ sys.exit(abs(a - b) > 1e-9)' "$SCORED/n0_r4_replay.json" "$SCORED/al_margin_k_B5
                 --ann-dir "$DATA_DIR/eval" --img-root "$IMG_ROOT"
             step "M6_SCORE_$N" python -m tools.al_score --name "m6_r4_res$N" --pred "$OUT/task_5/pred_val.npz"
         done
+        ;;
+    m6_roi)
+        # 2026-11-28-plan-M6.2-roi-refine-va-sua-n2.md §3: train crop classifier tren Val-A (selection r3),
+        # loc + tron logit tren cac query map mo cua N0-r4-logits, cham Val-B mot lan (~25-35 phut)
+        CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
+        LOGITS="${M6_ROI_LOGITS:-$CAMP/runs/N0-r4-logits/task_5/logits_val.npz}"
+        IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
+        [[ -f "$LOGITS" ]] || { echo "[THIẾU] $LOGITS -> chạy n0_dump trước m6_roi" | tee -a "$MAIN_LOG"; exit 3; }
+        ROI_OUT="$REPO_DIR/data/training/update-model/m6_roi"
+        echo ">> M6.2 RoI-Refine: train crop classifier (${ROI_ARCH:-convnext_tiny}, ${ROI_EPOCHS:-12} ep)..." | tee -a "$MAIN_LOG"
+        step M6_ROI_TRAIN python -m tools.roi_refine_train --data "$DATA_DIR" --img-root "$IMG_ROOT" \
+            --selection "${ROI_SELECTION:-margin_k_B500_r3}" --arch "${ROI_ARCH:-convnext_tiny}" \
+            --epochs "${ROI_EPOCHS:-12}" --batch-size "${ROI_BATCH:-64}" --out "$ROI_OUT"
+        echo ">> M6.2 RoI-Refine: suy luận query mập mờ + tìm chính sách trên calib + chấm Val-B..." | tee -a "$MAIN_LOG"
+        step M6_ROI_EVAL python -m tools.roi_refine_eval --data "$DATA_DIR" --img-root "$IMG_ROOT" \
+            --logits "$LOGITS" --checkpoint "$ROI_OUT/roi_classifier.pth" --name "m6_roi_r4" --out "$ROI_OUT"
         ;;
     al_dot2)
         echo ">> Chạy Active Learning đợt 2 (B=250, 850 + entropy)..." | tee -a "$MAIN_LOG"

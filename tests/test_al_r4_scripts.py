@@ -336,3 +336,20 @@ def test_n0_dump_needs_the_r4_score(tmp_path):
     result, _ = _vast(tmp_path, 'n0_dump', files=M6_FILES)
     assert result.returncode == 3 and 'al_margin_k_B500_r4.json' in result.stdout
     assert not _calls(tmp_path, 'tools.predict_resolution')
+
+
+def test_m6_roi_trains_crop_classifier_then_evaluates(tmp_path):
+    logits_file = 'data/training/update-model/relearn-fix-v2/runs/N0-r4-logits/task_5/logits_val.npz'
+    result, metadata = _vast(tmp_path, 'm6_roi', files=(logits_file,))
+    assert result.returncode == 0, result.stdout + result.stderr
+    [train_call] = _calls(tmp_path, 'tools.roi_refine_train')
+    assert '--selection margin_k_B500_r3' in train_call and '--arch convnext_tiny' in train_call
+    [eval_call] = _calls(tmp_path, 'tools.roi_refine_eval')
+    assert 'logits_val.npz' in eval_call and '--name m6_roi_r4' in eval_call
+    assert 'Exit Code: 0' in metadata.read_text()
+
+
+def test_m6_roi_stops_when_logits_are_missing(tmp_path):
+    result, _ = _vast(tmp_path, 'm6_roi', files=())
+    assert result.returncode == 3 and 'logits_val.npz' in result.stdout
+    assert not _calls(tmp_path, 'tools.roi_refine_train')

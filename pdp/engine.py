@@ -77,6 +77,17 @@ def pseudo_cache_enabled(args):
 	return not blockers
 
 
+def needs_teacher(args, task_id: int) -> bool:
+	"""Whether training ``task_id`` requires a frozen teacher (for pseudo-labels, feature KD, or logit KD)."""
+	if task_id <= 1 or getattr(args, 'joint', False):
+		return False
+	return (
+		getattr(args, 'pseudo', 'ppg') != 'none'
+		or getattr(args, 'logit_kd', 0) > 0
+		or getattr(args, 'feature_kd', 0) > 0
+	)
+
+
 def validate_logit_kd(args):
 	"""N2: --logit_kd and --logit_kd_box are weights (>= 0), --logit_kd_topk at least one query."""
 	if getattr(args, 'logit_kd', 0) < 0 or getattr(args, 'logit_kd_box', 0) < 0:
@@ -526,14 +537,15 @@ class local_trainer(pl.LightningModule):
 		shared = {} if backbone_features is None else {'backbone_features': backbone_features}
 
 		old_model_outputs = None
+		use_pseudo = getattr(self.args, 'pseudo', 'ppg') != 'none'
 		if (not self.eval_mode and self.task_id > 1 and self.teacher is not None and
 			hasattr(self.args, 'use_distillation') and self.args.use_distillation):
-			pseudo = self.cached_pseudo_labels(labels, pixel_mask)
+			pseudo = self.cached_pseudo_labels(labels, pixel_mask) if use_pseudo else None
 			if pseudo is None:
 				old_model_outputs = self.teacher_outputs(pixel_values, pixel_mask, **shared)
 			else:
 				labels = self.attach_pseudo_labels(labels, pseudo)
-		if old_model_outputs is not None:
+		if old_model_outputs is not None and use_pseudo:
 			if self.args.ppg_legacy:
 				old_results = self.processor.post_process(
 					old_model_outputs,
@@ -667,20 +679,30 @@ class local_trainer(pl.LightningModule):
 			loss_dict['loss_proto'] = proto_loss
 			loss = loss + self.args.proto_margin_lambda * proto_loss
 
-		if self.training and old_model_outputs is not None and self.args.feature_kd > 0:
-			kd_loss = F.mse_loss(outputs.encoder_last_hidden_state, old_model_outputs.encoder_last_hidden_state)
-			loss_dict['loss_feature_kd'] = kd_loss
-			loss = loss + self.args.feature_kd * kd_loss
+		if self.training and self.args.feature_kd > 0:
+			if self.task_id > 1 and not getattr(self.args, 'joint', False) and old_model_outputs is None:
+				raise RuntimeError(
+					'--feature_kd > 0 on task_id > 1 requires a teacher (self.teacher is None or distillation off)'
+				)
+			if old_model_outputs is not None:
+				kd_loss = F.mse_loss(outputs.encoder_last_hidden_state, old_model_outputs.encoder_last_hidden_state)
+				loss_dict['loss_feature_kd'] = kd_loss
+				loss = loss + self.args.feature_kd * kd_loss
 
-		if self.training and old_model_outputs is not None and getattr(self.args, 'logit_kd', 0) > 0:
-			mask = select_kd_queries(old_model_outputs.logits, self.PREV_INTRODUCED_CLS, self.args.logit_kd_topk)
-			logit_kd = logit_kd_loss(outputs.logits, old_model_outputs.logits, mask, self.PREV_INTRODUCED_CLS)
-			loss_dict['loss_logit_kd'] = logit_kd
-			loss = loss + self.args.logit_kd * logit_kd
-			if self.args.logit_kd_box > 0:
-				box_kd = box_kd_loss(outputs.pred_boxes, old_model_outputs.pred_boxes, mask)
-				loss_dict['loss_box_kd'] = box_kd
-				loss = loss + self.args.logit_kd_box * box_kd
+		if self.training and getattr(self.args, 'logit_kd', 0) > 0:
+			if self.task_id > 1 and not getattr(self.args, 'joint', False) and old_model_outputs is None:
+				raise RuntimeError(
+					'--logit_kd > 0 on task_id > 1 requires a teacher (self.teacher is None or distillation off)'
+				)
+			if old_model_outputs is not None:
+				mask = select_kd_queries(old_model_outputs.logits, self.PREV_INTRODUCED_CLS, self.args.logit_kd_topk)
+				logit_kd = logit_kd_loss(outputs.logits, old_model_outputs.logits, mask, self.PREV_INTRODUCED_CLS)
+				loss_dict['loss_logit_kd'] = logit_kd
+				loss = loss + self.args.logit_kd * logit_kd
+				if self.args.logit_kd_box > 0:
+					box_kd = box_kd_loss(outputs.pred_boxes, old_model_outputs.pred_boxes, mask)
+					loss_dict['loss_box_kd'] = box_kd
+					loss = loss + self.args.logit_kd_box * box_kd
 
 		if self.args.use_prompts and self.args.local_query:
 			loss_dict['query_loss'] = query_loss

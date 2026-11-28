@@ -4,7 +4,7 @@ the queries it is confident about (ERD), from task 2 on; it needs the teacher ev
 import pytest
 import torch
 
-from engine import box_kd_loss, logit_kd_loss, select_kd_queries, validate_logit_kd
+from engine import box_kd_loss, logit_kd_loss, needs_teacher, select_kd_queries, validate_logit_kd
 from pdp_helpers import make_batch, make_trainer, pdp_args, use_tiny_detr
 
 
@@ -123,3 +123,30 @@ def test_round4_n2_tag_is_r4_plus_the_logit_kd():
     assert um._logit_kd(recipe) == 1.0 and um._logit_kd(um.VARIANTS["r4"]) == 0
     assert common_sh_value("--logit_kd", {}) == "0"
     assert common_sh_value("--logit_kd", {"LOGIT_KD": "1.0"}) == "1.0"
+
+
+def test_needs_teacher_with_pseudo_none_and_logit_kd(tmp_path):
+    assert not needs_teacher(pdp_args(tmp_path, '--pseudo', 'none'), task_id=2)
+    assert needs_teacher(pdp_args(tmp_path, '--pseudo', 'none', '--logit_kd', '1.0'), task_id=2)
+    assert needs_teacher(pdp_args(tmp_path, '--pseudo', 'none', '--feature_kd', '0.5'), task_id=2)
+    assert not needs_teacher(pdp_args(tmp_path, '--pseudo', 'none', '--logit_kd', '1.0'), task_id=1)
+
+
+@pytest.mark.slow
+def test_pseudo_none_with_logit_kd_computes_lkd_without_attaching_pseudo_labels(tmp_path, tiny):
+    trainer = task_trainer(tmp_path, 2, '--pseudo', 'none', '--logit_kd', '1.0')
+    batch = make_batch([[3], [3, 4]])
+    orig_counts = [len(t['class_labels']) for t in batch['labels']]
+    loss, loss_dict = trainer.common_step(batch, 0)
+    assert 'loss_logit_kd' in loss_dict
+    assert torch.isfinite(loss)
+    assert [len(t['class_labels']) for t in batch['labels']] == orig_counts
+    assert getattr(trainer, 'ppg_pseudo_labels_total', 0) == 0
+
+
+@pytest.mark.slow
+def test_logit_kd_without_teacher_fails_fast_on_task2(tmp_path, tiny):
+    trainer = make_trainer(pdp_args(tmp_path, '--pseudo', 'none', '--logit_kd', '1.0'), task_id=2)
+    trainer.train()
+    with pytest.raises(RuntimeError, match='--logit_kd > 0'):
+        trainer.common_step(make_batch([[3], [3, 4]]), 0)

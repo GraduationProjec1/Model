@@ -34,6 +34,7 @@ from autocheckout.counting import (
     gt_counts,
     label_thresholds,
     select_group_thresholds,
+    select_group_thresholds_robust,
 )
 from autocheckout.datapaths import Layout
 from autocheckout.feedback_fix import subset
@@ -110,15 +111,21 @@ def count_on(coco_full: dict, cfg: TaskConfig, preds: Predictions, ids: list[int
 
 def score(val_full: dict, cfg: TaskConfig, preds: Predictions, calib: list[int], target: list[int], *,
           groups: tuple[list[list[int]], list[str]] | None = None, grid: tuple[float, ...] = CALIBRATION_GRID,
-          unlearned_iou: float | None = None) -> dict:
+          unlearned_iou: float | None = None, robust: bool = False) -> dict:
     """Thresholds chosen on ``calib`` images only, then applied to ``target`` images."""
     label_groups, names = groups or group_labels(cfg)
     seen = sum(len(g) for g in label_groups)
     coco, rows = _view(val_full, preds, sorted(calib), seen, unlearned_iou)
-    vector, calib_scores = select_group_thresholds(coco, dedup_detections(rows, NMS), label_groups, grid)
+    deduped = dedup_detections(rows, NMS)
+    if robust:
+        vector, calib_scores = select_group_thresholds_robust(coco, deduped, label_groups, grid)
+    else:
+        vector, calib_scores = select_group_thresholds(coco, deduped, label_groups, grid)
     result = {'thresholds': dict(zip(names, vector, strict=True)), 'nms_iou': NMS,
               'calib_images': len(coco.getImgIds()), 'calib_cAcc': calib_scores['cAcc'],
               **count_on(val_full, cfg, preds, target, vector, groups=label_groups, unlearned_iou=unlearned_iou)}
+    if robust:
+        result['robust_calib'] = True
     if grid != CALIBRATION_GRID or unlearned_iou:
         result.update(grid=[grid[0], grid[-1]], unlearned_iou=unlearned_iou,
                       at_floor=[n for n, v in zip(names, vector, strict=True) if v <= grid[0]])
@@ -137,6 +144,8 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument('--ref-config', type=Path, help='r1 task config of --groups r1 (default: <data>/eval)')
     ap.add_argument('--target', choices=('valb', 'pool'), default='valb', help='Val-B, or the Val-A pool')
     ap.add_argument('--grid-min', type=float, help='lower end of the threshold grid (default 0.10)')
+    ap.add_argument('--robust-calib', action='store_true',
+                    help='use 5-fold midpoint/ACD threshold selection (min 0.18) to avoid calib overfitting')
     ap.add_argument('--unlearned-iou', type=float, default=UNLEARNED_IOU,
                     help='cAcc-M2 IoU, applied before the last task only')
     ap.add_argument('--out', type=Path, help='default: <data>/relearn/active/scored/<name>.json')
@@ -161,7 +170,7 @@ def main(argv: list[str] | None = None) -> dict:
     target = split['pool'] if args.target == 'pool' else sorted(i['id'] for i in load_json(rel / 'meta/val_b.json')['images'])
     result = {'name': args.name, 'pred': str(args.pred), 'pred_md5': md5_file(args.pred),
               **score(val_full, cfg, preds, calib, target, groups=groups, grid=threshold_grid(args.grid_min),
-                      unlearned_iou=unlearned)}
+                      unlearned_iou=unlearned, robust=args.robust_calib)}
     if (args.stage, args.groups, args.target, args.task_config, args.eval_dir) != (STAGE, 'task', 'valb', None, None):
         result.update(stage=args.stage, task_config=cfg.name, groups=args.groups, target=args.target)
     save_json(args.out or rel / f'active/scored/{args.name}.json', result, indent=1)

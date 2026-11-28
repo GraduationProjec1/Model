@@ -209,37 +209,120 @@ def label_thresholds(groups: Sequence[Sequence[int]], thresholds: Sequence[float
 
 def select_group_thresholds(
     coco_gt: COCO, preds: Predictions, groups: Sequence[Sequence[int]], thresholds: Sequence[float] = THRESHOLD_GRID,
-    max_passes: int = 10,
+    max_passes: int = 10, tie_break: str = "smallest",
 ) -> tuple[list[float], dict[str, float]]:
     """FULL-SYN F0.5 (synthetic v2 D8): one score threshold per task group, maximising cAcc on validation.
 
     Classes learned early are forgotten little by little and get lower scores than new ones, so one threshold
     undercounts one group or overcounts the other. Coordinate ascent from the best single threshold: each group in
-    turn takes the grid value with the highest cAcc, the others fixed; only a strictly higher cAcc replaces the
-    current value (ties keep it, then the smaller threshold), until a pass changes nothing. With one group this is
-    ``select_threshold``."""
+    turn takes the grid value with the highest cAcc, the others fixed; with ``tie_break="smallest"`` (default) only
+    a strictly higher cAcc replaces the current value (ties keep the smaller threshold). With ``tie_break="midpoint"``
+    ties prefer lower ACD and then the midpoint of the tied plateau, avoiding noisy low-threshold collapses on small
+    calibration sets. With one group and ``tie_break="smallest"`` this is ``select_threshold``."""
+    if tie_break not in ("smallest", "midpoint"):
+        raise ValueError(f"tie_break must be 'smallest' or 'midpoint', got {tie_break!r}")
     thresholds = validated_grid(thresholds, "threshold grid")
     labels = sorted(label for group in groups for label in group)
     image_ids = sorted(coco_gt.getImgIds())
+    return _select_group_thresholds_on_ids(coco_gt, preds, groups, labels, image_ids, thresholds, max_passes, tie_break)
+
+
+def _select_group_thresholds_on_ids(
+    coco_gt: COCO,
+    preds: Predictions,
+    groups: Sequence[Sequence[int]],
+    labels: Sequence[int],
+    image_ids: Sequence[int],
+    thresholds: Sequence[float],
+    max_passes: int = 10,
+    tie_break: str = "smallest",
+) -> tuple[list[float], dict[str, float]]:
+    if not image_ids:
+        raise ValueError("calibration needs a nonempty validation image set")
     gt = gt_counts(coco_gt, image_ids, labels)
     top1 = preds.top1_per_query()
 
     def score(vector):
         return counting_scores(count_matrix(top1, image_ids, labels, label_thresholds(groups, vector)), gt)
 
-    single, best_scores = select_threshold(coco_gt, preds, labels, thresholds)
+    def pick_best(candidates: list[tuple[float, dict[str, float]]]) -> tuple[float, dict[str, float]]:
+        max_cacc = max(s["cAcc"] for _, s in candidates)
+        tied = [(t, s) for t, s in candidates if s["cAcc"] >= max_cacc - 1e-12]
+        if tie_break == "smallest":
+            return tied[0]
+        min_acd = min(s["ACD"] for _, s in tied)
+        best_tied = [(t, s) for t, s in tied if s["ACD"] <= min_acd + 1e-12]
+        return best_tied[len(best_tied) // 2]
+
+    single_cands = [(float(t), counting_scores(count_matrix(top1, image_ids, labels, float(t)), gt)) for t in thresholds]
+    single, best_scores = pick_best(single_cands)
     best = [single] * len(groups)
     for _ in range(max_passes):
         changed = False
         for g in range(len(groups)):
-            for threshold in thresholds:
-                candidate = [*best[:g], threshold, *best[g + 1:]]
-                scores = score(candidate)
-                if scores["cAcc"] > best_scores["cAcc"]:
-                    best, best_scores, changed = candidate, scores, True
+            if tie_break == "smallest":
+                for threshold in thresholds:
+                    candidate = [*best[:g], threshold, *best[g + 1:]]
+                    scores = score(candidate)
+                    if scores["cAcc"] > best_scores["cAcc"]:
+                        best, best_scores, changed = candidate, scores, True
+            else:
+                cands = [(float(t), score([*best[:g], float(t), *best[g + 1:]])) for t in thresholds]
+                chosen_t, chosen_scores = pick_best(cands)
+                if chosen_t != best[g] and (
+                    chosen_scores["cAcc"] > best_scores["cAcc"] + 1e-12
+                    or (abs(chosen_scores["cAcc"] - best_scores["cAcc"]) <= 1e-12
+                        and chosen_scores["ACD"] < best_scores["ACD"] - 1e-12)
+                ):
+                    best = [*best[:g], chosen_t, *best[g + 1:]]
+                    best_scores = chosen_scores
+                    changed = True
         if not changed:
             break
     return best, best_scores
+
+
+def select_group_thresholds_robust(
+    coco_gt: COCO,
+    preds: Predictions,
+    groups: Sequence[Sequence[int]],
+    thresholds: Sequence[float] = THRESHOLD_GRID,
+    folds: int = 5,
+    min_threshold: float = 0.18,
+    seed: int = 0,
+    max_passes: int = 10,
+) -> tuple[list[float], dict[str, float]]:
+    """Stabilised per-task threshold selection on small calib sets: filters ``t >= min_threshold``, uses
+    midpoint/ACD tie-breaking, and averages across K-fold subsets (per-group median snapped to grid)."""
+    if folds < 1:
+        raise ValueError(f"folds must be >= 1, got {folds}")
+    grid = validated_grid(thresholds, "threshold grid")
+    filtered = [t for t in grid if t >= min_threshold - 1e-12] or grid
+    labels = sorted(label for group in groups for label in group)
+    image_ids = sorted(coco_gt.getImgIds())
+    if not image_ids:
+        raise ValueError("calibration needs a nonempty validation image set")
+    if folds == 1 or len(image_ids) < folds:
+        return _select_group_thresholds_on_ids(
+            coco_gt, preds, groups, labels, image_ids, filtered, max_passes, tie_break="midpoint"
+        )
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(len(image_ids))
+    chunks = np.array_split(perm, folds)
+    fold_vectors: list[list[float]] = []
+    for k in range(folds):
+        val_idx = set(chunks[k].tolist())
+        train_ids = [image_ids[i] for i in range(len(image_ids)) if i not in val_idx]
+        vec, _ = _select_group_thresholds_on_ids(
+            coco_gt, preds, groups, labels, train_ids, filtered, max_passes, tie_break="midpoint"
+        )
+        fold_vectors.append(vec)
+    arr = np.asarray(fold_vectors, dtype=np.float64)
+    medians = np.median(arr, axis=0)
+    snapped = [float(min(filtered, key=lambda t: abs(t - m))) for m in medians]
+    gt = gt_counts(coco_gt, image_ids, labels)
+    scores = counting_scores(count_matrix(preds.top1_per_query(), image_ids, labels, label_thresholds(groups, snapped)), gt)
+    return snapped, scores
 
 
 def validated_grid(values: Sequence[float], name: str) -> list[float]:

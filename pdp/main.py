@@ -21,7 +21,7 @@ from datetime import timedelta
 
 import pytorch_lightning as pl
 from datasets.coco_eval import CocoEvaluator
-from engine import local_trainer, Evaluator
+from engine import local_trainer, Evaluator, needs_teacher
 from inference import write_predictions
 from augment import TrainAugment
 from checkpointing import ResumeCheckpoint, PlannedTrainingStop, ResumeAudit, TrainingProgress, remove_resume_checkpoints, resume_path, restore_best_epoch
@@ -455,7 +455,7 @@ def run_task(args, task_id, output_root, processor=None):
         else:
             trainer.resume()
 
-        if task_id > 1 and args.pseudo != 'none' and not args.joint:
+        if needs_teacher(args, task_id):
             trainer.set_teacher()
 
         if args.use_prompts and args.init_new_prompts:
