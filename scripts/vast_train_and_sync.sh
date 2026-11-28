@@ -246,13 +246,14 @@ case "$TASK" in
             step B3 env R3_FREEZE_DATA=real bash scripts/run_al.sh al_margin_k_B500_r3_freeze
         fi
         ;;
-    attn_e1|attn_e2|attn_e3|attn_e4|attn_e5|attn_m1|n3_e|n2_e)
+    attn_e1|attn_e2|attn_e3|attn_e4|attn_e5|attn_m1|n3_e|n2_e|r4_all_g3|r4_res800|r4_lora)
         # docs/ai/planning/2026-11-25-ke-hoach-chay.md, 2026-11-25-plan-B-C1.md: G0 (P1 trên GPU) rồi một lượt r4 với
         # E1 = A (prompt theo từng query), E2 = A + B (prompt hiệu chỉnh cross-attn), E3 = chỉ B,
         # E4 = A + C1 (K = 100 query đề xuất từ encoder), E5 = A + B + C1;
         # M1 = A + loss biên prototype (2026-11-26-plan-M1-M6-kiem-prototype.md §3);
         # 2026-11-26-plan-N1-N5-hieu-chinh-task-va-loss.md: N3 = focal phạt lớp cùng nhóm, w = 2 rồi w = 3 (§4.4),
-        # N2 = chưng cất logit từ teacher, λ = 1 (§5.4); cả hai giữ cấu hình r4
+        # N2 = chưng cất logit từ teacher, λ = 1 (§5.4);
+        # Mở rộng: r4_all_g3 (200 hàng + g3), r4_res800 (fine-tune 800px), r4_lora (decoder LoRA rank-8 + N2 LKD)
         CAMP="$REPO_DIR/data/training/update-model/relearn-fix-v2"
         R3="$CAMP/runs/EXP-FB-FT-al_margin_k_B500_r3_real/task_5/task_final.pth"
         case "$TASK" in
@@ -264,6 +265,9 @@ case "$TASK" in
             attn_m1) VS=al_margin_k_B500_r4_pqm ;;
             n3_e) VS="al_margin_k_B500_r4_g2 al_margin_k_B500_r4_g3" ;;
             n2_e) VS=al_margin_k_B500_r4_lkd ;;
+            r4_all_g3) VS=al_margin_k_B500_r4_all_g3 ;;
+            r4_res800) VS=al_margin_k_B500_r4_res800 ;;
+            r4_lora) VS=al_margin_k_B500_r4_lora ;;
         esac
         IMG_ROOT="$DATA_DIR/rpc"; [[ -d "$IMG_ROOT/val2019" ]] || IMG_ROOT="$DATA_DIR/archive"
         NEED=("$CAMP/plan.json" "$CAMP/stages/baseline.json" "$CAMP/stages/al_margin_k_B500_r3_real.json" "$R3"

@@ -1880,6 +1880,13 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
 
 
         self.model = DeformableDetrModel(config)
+        if getattr(config, "decoder_lora_rank", 0) > 0:
+            from .lora import inject_decoder_lora
+            inject_decoder_lora(
+                self.model.decoder,
+                rank=int(config.decoder_lora_rank),
+                alpha=float(getattr(config, "decoder_lora_alpha", 16.0)),
+            )
         self.matcher = DeformableDetrHungarianMatcher(
                 class_cost=config.class_cost, bbox_cost=config.bbox_cost, giou_cost=config.giou_cost
             )

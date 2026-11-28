@@ -72,7 +72,11 @@ R4_TAGS = {'pq': {'per_query_prompt': 1},
                     'new_params_extra': 'prompts.xattn,proposals'},
            'pqm': {'per_query_prompt': 1, 'proto_margin_lambda': 0.1},
            'g2': {'group_neg_weight': 2.0}, 'g3': {'group_neg_weight': 3.0},
-           'lkd': {'logit_kd': 1.0}}
+           'lkd': {'logit_kd': 1.0},
+           'all_g3': {'group_neg_weight': 3.0, 'train_rows': 'all'},
+           'res800': {'resolution': 800, 'allow_resolution_change': 1, 'batch_size': 4},
+           'lora': {'decoder_lora_rank': 8, 'decoder_lora_alpha': 16.0, 'logit_kd': 1.0,
+                    'new_params_extra': 'lora_A,lora_B'}}
 VARIANTS.update({f'r4_{tag}': {**VARIANTS['r4'], **recipe} for tag, recipe in R4_TAGS.items()})
 R4_FROM = 'real'
 TRAIN_SEED = 0
@@ -478,15 +482,26 @@ def _train(plan: dict, record: dict, attempt: Path, name: str, task_dir: Path, r
     runs, experiment = Path(plan['runs']), f'{EXP}-{name}'
     fsa_hf = str(runs / FSA / 'task_1/hf_model')
     view = {**plan, 'task_dir': str(task_dir), 'synth_root': str(release)}
+    extra_env = {}
+    if hp.get('resolution'):
+        view['resolution'] = int(hp['resolution'])
+    if hp.get('batch_size'):
+        view['batch_size'] = min(int(view.get('batch_size', hp['batch_size'])), int(hp['batch_size']))
+    if hp.get('allow_resolution_change'):
+        extra_env['ALLOW_RESOLUTION_CHANGE'] = int(hp['allow_resolution_change'])
+    if hp.get('decoder_lora_rank'):
+        extra_env['DECODER_LORA_RANK'] = int(hp['decoder_lora_rank'])
+        extra_env['DECODER_LORA_ALPHA'] = float(hp.get('decoder_lora_alpha', 16.0))
     environment = _environment(view, experiment, runs, START_TASK=STAGE, N_TASKS=STAGE, EPOCHS=hp['epochs'],
                                PRED_SPLITS=splits, STOP_AFTER_STEPS=0, FSA_HF=fsa_hf, PREV_CKPT=prev,
-                               TRAIN_ROWS=task_dir / 'train_rows.json', LR=hp['lr'], LR_OLD=hp['lr_old'],
+                               TRAIN_ROWS=hp.get('train_rows') or (task_dir / 'train_rows.json'),
+                               LR=hp['lr'], LR_OLD=hp['lr_old'],
                                LR_DROP=hp['lr_drop'], AUGMENT=hp.get('augment', 0),
                                TUNE_OLD_PRIVATE=hp.get('tune_old_private', 0), SEED=_train_seed(hp),
                                PER_QUERY_PROMPT=_per_query_prompt(hp), NEW_PARAMS_EXTRA=_new_params_extra(hp),
                                PROMPT_XATTN=_prompt_cross_attn(hp), QUERY_PROPOSALS=_query_proposals(hp),
                                PROTO_MARGIN_LAMBDA=_proto_margin_lambda(hp),
-                               GROUP_NEG_WEIGHT=_group_neg_weight(hp), LOGIT_KD=_logit_kd(hp))
+                               GROUP_NEG_WEIGHT=_group_neg_weight(hp), LOGIT_KD=_logit_kd(hp), **extra_env)
     output = runs / experiment
     output.mkdir(parents=True, exist_ok=True)
     lines = [f'source "$REPO/configs/exp/native/{EXP}.sh"']

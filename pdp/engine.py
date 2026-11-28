@@ -195,6 +195,8 @@ class local_trainer(pl.LightningModule):
 		detr_config.xattn_alpha_max = getattr(args, 'xattn_alpha_max', 0.5)
 		detr_config.query_proposals = getattr(args, 'query_proposals', 0)
 		detr_config.lambda_prop = getattr(args, 'lambda_prop', 1.0)
+		detr_config.decoder_lora_rank = getattr(args, 'decoder_lora_rank', 0)
+		detr_config.decoder_lora_alpha = getattr(args, 'decoder_lora_alpha', 16.0)
 		detr_config.task_num_classes = args.task_num_classes
 		detr_config.use_shared_pool = args.use_shared
 		detr_config.use_private_pool = args.use_private
@@ -881,6 +883,7 @@ class local_trainer(pl.LightningModule):
 			state = {k: v for k, v in state.items() if k not in dropped}
 		prefixes = ['.prompts.xattn_'] if getattr(self.args, 'prompt_cross_attn', 0) else []
 		prefixes += ['.proposals.'] if getattr(self.args, 'query_proposals', 0) else []
+		prefixes += ['.lora_A', '.lora_B'] if getattr(self.args, 'decoder_lora_rank', 0) > 0 else []
 		current = self.model.state_dict()
 		added = [k for k in current if k not in state and any(p in k for p in prefixes)]
 		if added:
@@ -924,7 +927,7 @@ class local_trainer(pl.LightningModule):
 				flag = False
 				parts = name.split('.')
 				for n in parts:
-					if n in freeze and not set(parts) & set(tune):
+					if n in freeze and not set(parts) & set(tune) and not ({'lora_A', 'lora_B'} & set(parts)):
 						params.requires_grad = False
 						flag = True
 				if not flag:

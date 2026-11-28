@@ -353,3 +353,17 @@ def test_m6_roi_stops_when_logits_are_missing(tmp_path):
     result, _ = _vast(tmp_path, 'm6_roi', files=())
     assert result.returncode == 3 and 'logits_val.npz' in result.stdout
     assert not _calls(tmp_path, 'tools.roi_refine_train')
+
+
+@pytest.mark.parametrize('task, variant', [
+    ('r4_all_g3', 'al_margin_k_B500_r4_all_g3'),
+    ('r4_res800', 'al_margin_k_B500_r4_res800'),
+    ('r4_lora', 'al_margin_k_B500_r4_lora'),
+])
+def test_new_r4_upgrade_tasks_wire_through_vast_train_and_sync(tmp_path, task, variant):
+    result, metadata = _vast(tmp_path, task)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(_calls(tmp_path, 'tools.p1_check')) == 1
+    assert _steps(tmp_path) == [f'run_al {variant} REUSE_FEATURES=1']
+    assert any(f'--name {variant}_robust' in c and '--robust-calib' in c for c in _calls(tmp_path, 'tools.al_score'))
+    assert 'Exit Code: 0' in metadata.read_text()

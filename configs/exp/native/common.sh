@@ -25,6 +25,8 @@ ARGS=(
     --per_query_prompt "${PER_QUERY_PROMPT:-0}" --prompt_cross_attn "${PROMPT_XATTN:-0}"
     --query_proposals "${QUERY_PROPOSALS:-0}" --proto_margin_lambda "${PROTO_MARGIN_LAMBDA:-0}"
     --group_neg_weight "${GROUP_NEG_WEIGHT:-1}" --logit_kd "${LOGIT_KD:-0}"
+    --allow_resolution_change "${ALLOW_RESOLUTION_CHANGE:-0}"
+    --decoder_lora_rank "${DECODER_LORA_RANK:-0}" --decoder_lora_alpha "${DECODER_LORA_ALPHA:-16.0}"
     --lambda_query 0.1 --ddl_lambda 0.15 --query_loss_grad 1
     --freeze backbone,encoder,decoder --new_params class_embed,prompts
     --freeze_shared_after_task1 0 --pseudo_dedup_iou 0

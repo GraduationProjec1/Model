@@ -292,6 +292,12 @@ def get_args_parser():
     parser.add_argument('--group_neg_weight', default=1.0, type=float,
                         help='N3: focal-loss weight (>= 1) of the negative logits of a matched query on the classes '
                              'that share the supercategory of its target (--task_config); 1 = off')
+    parser.add_argument('--allow_resolution_change', default=0, type=int,
+                        help='M6-train: allow fine-tuning from a checkpoint at a different --image_size (0 = off)')
+    parser.add_argument('--decoder_lora_rank', default=0, type=int,
+                        help='LoRA rank on decoder self/cross-attention projections (0 = off; e.g. 8)')
+    parser.add_argument('--decoder_lora_alpha', default=16.0, type=float,
+                        help='LoRA scaling alpha for --decoder_lora_rank (default 16.0)')
     parser.add_argument('--optim_groups', default='auto', choices=['auto', 'prompt', 'detr'],
                         help="B1: 'detr' = full fine-tuning learning rates; 'auto' = original rule")
     parser.add_argument('--joint', default=0, type=int,

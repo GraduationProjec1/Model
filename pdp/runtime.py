@@ -26,7 +26,7 @@ def checkpoint_runtime(path):
     return torch.load(path, map_location="cpu").get("runtime")
 
 
-UPGRADES = ("per_query_prompt", "prompt_cross_attn", "query_proposals")
+UPGRADES = ("per_query_prompt", "prompt_cross_attn", "query_proposals", "decoder_lora_rank")
 POOLS = (("use_shared", "use_shared_pool"), ("use_private", "use_private_pool"))
 
 
@@ -38,15 +38,14 @@ def validate_runtime(args, runtime):
         raise ValueError("Requested backbone conflicts with checkpoint runtime")
     shortest = getattr(args, "image_size", None)
     longest = getattr(args, "max_image_size", None)
-    # M6: --eval_resolution predicts at another size on purpose (main() allows it with --predict_only only)
-    if not getattr(args, "eval_resolution", 0) and (
+    # M6: --eval_resolution predicts at another size; --allow_resolution_change permits fine-tuning at another size
+    if not getattr(args, "eval_resolution", 0) and not getattr(args, "allow_resolution_change", 0) and (
         shortest is not None
         and shortest != size["shortest_edge"]
         or (longest is not None and longest != size["longest_edge"])
     ):
         raise ValueError("Requested resolution conflicts with checkpoint processor")
-    # A, B: a run may switch on a new module the checkpoint lacks (A drops query_tf, B starts at zero); not the
-    # reverse
+    # A, B, LoRA: a run may switch on a new module the checkpoint lacks (B/LoRA start at zero); not the reverse
     upgrades = {f for f in UPGRADES if getattr(args, f, 0) and not config.get(f)}
     skipped = upgrades | ({"local_query"} if "per_query_prompt" in upgrades else set())
     # B2 (EXP-FULL-SYN-NAIVE): a run may switch off a prompt pool the checkpoint used (its prompts stay in the state,
@@ -59,6 +58,7 @@ def validate_runtime(args, runtime):
         ("per_query_prompt", "per_query_prompt"),
         ("prompt_cross_attn", "prompt_cross_attn"),
         ("query_proposals", "query_proposals"),
+        ("decoder_lora_rank", "decoder_lora_rank"),
         ("num_prompts", "num_prompts"),
         ("prompt_len", "prompt_len"),
         ("use_shared", "use_shared_pool"),
@@ -112,6 +112,15 @@ def processor(args, factory):
         resolution = getattr(args, "eval_resolution", 0)
         if resolution:
             result.size = {"shortest_edge": resolution, "longest_edge": resolution}
+        elif getattr(args, "allow_resolution_change", 0):
+            shortest = getattr(args, "image_size", None)
+            longest = getattr(args, "max_image_size", None)
+            if shortest is not None or longest is not None:
+                shortest = shortest if shortest is not None else result.size["shortest_edge"]
+                longest = longest if longest is not None else shortest
+                if shortest <= 0 or longest < shortest:
+                    raise ValueError("resolution requires 0 < image_size <= max_image_size")
+                result.size = {"shortest_edge": shortest, "longest_edge": longest}
         return result
     result = factory.from_pretrained(args.repo_name) if args.repo_name else factory()
     shortest, longest = getattr(args, "image_size", None), getattr(
@@ -242,7 +251,8 @@ def training_contract(args):
                          ("query_proposals", 0), ("lambda_prop", 1.0), ("proto_margin_lambda", 0.0),
                          ("proto_margin", 0.1), ("proto_temp", 0.1), ("proto_topk", 20), ("proto_anchor", "prototype"),
                          ("group_neg_weight", 1.0), ("logit_kd", 0.0), ("logit_kd_box", 0.0),
-                         ("logit_kd_topk", 10)):
+                         ("logit_kd_topk", 10), ("allow_resolution_change", 0),
+                         ("decoder_lora_rank", 0), ("decoder_lora_alpha", 16.0)):
         if getattr(args, key, default) != default:
             result[key] = getattr(args, key)
     files = {"task_config": args.task_config}
